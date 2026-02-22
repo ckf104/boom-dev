@@ -301,6 +301,22 @@ class BoomFrontendIO(implicit p: Parameters) extends BoomBundle
   val itlb_hit = Input(Bool())
   val icache_valid_access = Input(Bool())
   val icache_hit = Input(Bool())
+
+  // Frontend s2 replay statistics
+  val s2_replay_total     = Input(Bool())
+  val s2_replay_itlb_miss = Input(Bool())
+  val s2_replay_ic_miss   = Input(Bool())
+
+  // Fetch buffer enqueue monitor (for perf counters)
+  val fb_enq_valid = Input(Bool())
+  val fb_enq_cnt   = Input(UInt(log2Ceil(fetchWidth+1).W))
+
+  // Frontend s0 stall statistics
+  val s0_not_valid = Input(Bool())
+
+  // Frontend bubble statistics: f2/f3 prediction redirect bubbles
+  val f2_clear_bubble = Input(UInt(1.W))
+  val f3_clear_bubble = Input(UInt(2.W))
 }
 
 /**
@@ -429,6 +445,9 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   io.cpu.itlb_valid_access := tlb.io.req.valid
   io.cpu.itlb_hit := tlb.io.req.valid && !s1_tlb_miss
 
+  // s0 stall statistics
+  io.cpu.s0_not_valid := !s0_valid
+
   // --------------------------------------------------------
   // **** ICache Response (F2) ****
   // --------------------------------------------------------
@@ -449,8 +468,10 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   icache.io.s2_kill := s2_xcpt
 
   // s0_vpc 来源 3: icache/tlb miss 或者 f3 没有 ready 发生 replay
-  when ((s2_valid && !icache.io.resp.valid) ||
-        (s2_valid && icache.io.resp.valid && !f3_ready)) {
+  val s2_replay_happen = (s2_valid && !icache.io.resp.valid) ||
+        (s2_valid && icache.io.resp.valid && !f3_ready)
+  val f2_redirect_taken = WireInit(false.B)
+  when (s2_replay_happen) {
     s0_valid := (!s2_tlb_resp.ae.inst && !s2_tlb_resp.pf.inst) || s2_is_replay || s2_tlb_miss
     s0_vpc   := s2_vpc
     s0_is_replay := s2_valid && icache.io.resp.valid
@@ -463,6 +484,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     bpd_f2_clear := true.B
   // s0_vpc 来源 2: bpd f2 预测重定向
   } .elsewhen (bpd.io.resp.f2_redirect) {
+    f2_redirect_taken := true.B
     s0_valid     := !((s2_tlb_resp.ae.inst || s2_tlb_resp.pf.inst) && !s2_is_replay)
     s0_vpc       := bpd.io.resp.f2_next_pc
     s0_is_replay := false.B
@@ -811,6 +833,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
                           f3_pred_ghist_update_type =/= f3_bpd_resp.io.deq.bits.ghist_update_type &&
                           enableGHistStallRepair.B
 
+  val f3_redirect_taken = WireInit(false.B)
+
   when (f3.io.deq.valid && f4_ready) {
     when (f3_fetch_bundle.cfi_is_call && f3_fetch_bundle.cfi_idx.valid) {
       // 预译码检测到 call 指令时，ras top idx 更新和 ras top 内容更新同时发生 
@@ -839,6 +863,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     } .elsewhen (( s2_valid &&  (s2_vpc =/= f3_predicted_target || f3_correct_ghist)) ||
           (!s2_valid &&  s1_valid && (s1_vpc =/= f3_predicted_target || f3_correct_ghist)) ||
           (!s2_valid && !s1_valid)) {
+      f3_redirect_taken := true.B
       f2_clear := true.B
       bpd_f2_clear := true.B
       f1_clear := true.B
@@ -937,6 +962,29 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
 
   ftq.io.enq.valid          := f4.io.deq.valid && fb.io.enq.ready && !f4_delay
   ftq.io.enq.bits           := f4.io.deq.bits
+
+  // Frontend s2 replay statistics
+  io.cpu.s2_replay_total     := s2_replay_happen
+  io.cpu.s2_replay_itlb_miss := s2_replay_happen && s2_tlb_miss
+  io.cpu.s2_replay_ic_miss   := s2_replay_happen && !s2_tlb_miss && !icache.io.resp.valid
+
+  // Fetch buffer enqueue monitor
+  val fb_enq_fire = fb.io.enq.valid && fb.io.enq.ready
+  val fb_enq_cnt  = PopCount(fb.io.enq.bits.mask)
+  io.cpu.fb_enq_valid := fb_enq_fire
+  io.cpu.fb_enq_cnt   := fb_enq_cnt
+
+  // Frontend bubble statistics
+  // f2_clear_bubble: 1 when s0 vpc from f2 prediction redirect (1 cycle bubble)
+  // f3_clear_bubble: 2 when s0 vpc from f3 prediction redirect (2 cycles bubble)
+  when (f3_redirect_taken || io.cpu.sfence.valid || io.cpu.redirect_flush) {
+    f2_redirect_taken := false.B
+  }
+  when (io.cpu.sfence.valid || io.cpu.redirect_flush) {
+    f3_redirect_taken := false.B
+  }
+  io.cpu.f2_clear_bubble := Mux(f2_redirect_taken, 1.U, 0.U)
+  io.cpu.f3_clear_bubble := Mux(f3_redirect_taken, 2.U, 0.U)
 
   val bpd_update_arbiter = Module(new Arbiter(new BranchPredictionUpdate, 2))
   bpd_update_arbiter.io.in(0).valid := ftq.io.bpdupdate.valid

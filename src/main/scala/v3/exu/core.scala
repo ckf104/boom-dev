@@ -503,6 +503,29 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
     com_is_bsrcc(w) := valid && (uop.debug_tsrc === BSRC_C)
   }
 
+  // ROB flushes caused by MINI_EXCEPTION_MEM_ORDERING
+  val rob_mem_ordering_flush = rob.io.mem_ordering_flush
+
+  // Decode valid pattern statistics
+  val dec_all_false = !dec_valids.reduce(_||_)
+  val dec_all_true  = dec_valids.reduce(_&&_)
+
+  // Fetch buffer enqueue statistics from frontend
+  val fb_enq_cnt  = io.ifu.fb_enq_cnt
+  val fb_enq_fire = io.ifu.fb_enq_valid
+
+  // Frontend s2 replay statistics from frontend
+  val s2_replay_total     = io.ifu.s2_replay_total
+  val s2_replay_itlb_miss = io.ifu.s2_replay_itlb_miss
+  val s2_replay_ic_miss   = io.ifu.s2_replay_ic_miss
+
+  // Frontend s0 stall statistics from frontend
+  val s0_not_valid = io.ifu.s0_not_valid
+
+  // Frontend bubble statistics from frontend
+  val f2_clear_bubble = io.ifu.f2_clear_bubble
+  val f3_clear_bubble = io.ifu.f3_clear_bubble
+
   when (startCounter) {
     event_counters.io.event_signals(0) :=   1.U  //cycles
     event_counters.io.event_signals(1) :=  RegNext(PopCount(rob.io.commit.arch_valids.asUInt)) // commit inst
@@ -529,6 +552,54 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
     event_counters.io.event_signals(17) :=  PopCount(com_is_bsrc2.asUInt) // committed inst from f2 prediction
     event_counters.io.event_signals(18) :=  PopCount(com_is_bsrc3.asUInt) // committed inst from f3 prediction
     event_counters.io.event_signals(19) :=  PopCount(com_is_bsrcc.asUInt) // committed inst from backend correction
+
+    // Fetch buffer enqueue profiling
+    // 20: no enqueue this cycle
+    // 21: enqueue with 0 instructions
+    // 22: enqueue with 1 instruction
+    // 23: enqueue with 2 instructions
+    // 24: enqueue with 3 instructions
+    // 25: enqueue with 4 instructions
+    event_counters.io.event_signals(20) := Mux(!fb_enq_fire, 1.U, 0.U)
+    event_counters.io.event_signals(21) := Mux(fb_enq_fire && fb_enq_cnt === 0.U, 1.U, 0.U)
+    event_counters.io.event_signals(22) := Mux(fb_enq_fire && fb_enq_cnt === 1.U, 1.U, 0.U)
+    event_counters.io.event_signals(23) := Mux(fb_enq_fire && fb_enq_cnt === 2.U, 1.U, 0.U)
+    event_counters.io.event_signals(24) := Mux(fb_enq_fire && fb_enq_cnt === 3.U, 1.U, 0.U)
+    event_counters.io.event_signals(25) := Mux(fb_enq_fire && fb_enq_cnt === 4.U, 1.U, 0.U)
+
+    // Frontend s2 replay statistics
+    // 26: all s2 replays
+    // 27: s2 replays due to itlb miss
+    // 28: s2 replays due to icache miss with itlb hit
+    event_counters.io.event_signals(26) := Mux(s2_replay_total, 1.U, 0.U)
+    event_counters.io.event_signals(27) := Mux(s2_replay_itlb_miss, 1.U, 0.U)
+    event_counters.io.event_signals(28) := Mux(s2_replay_ic_miss, 1.U, 0.U)
+
+    // 29: dcache miss (LSU acquire)
+    event_counters.io.event_signals(29) := Mux(io.lsu.perf.acquire, 1.U, 0.U)
+
+    // 37: s0_valid is false
+    event_counters.io.event_signals(37) := Mux(s0_not_valid, 1.U, 0.U)
+
+    // 39: ROB flushes caused by MINI_EXCEPTION_MEM_ORDERING
+    event_counters.io.event_signals(39) := Mux(rob_mem_ordering_flush, 1.U, 0.U)
+
+    // Decode valid pattern profiling
+    // 40: all dec_valids are false
+    // 41: all dec_valids are true
+    // 42: mixed dec_valids (neither all false nor all true)
+    event_counters.io.event_signals(40) := Mux(dec_all_false, 1.U, 0.U)
+    event_counters.io.event_signals(41) := Mux(dec_all_true, 1.U, 0.U)
+    event_counters.io.event_signals(42) := Mux(!dec_all_false && !dec_all_true, 1.U, 0.U)
+
+    // 43-44: frontend bubble statistics by clear source
+    // 43: bubbles from F2 prediction redirect (1 cycle bubble)
+    // 44: bubbles from F3 prediction redirect (2 cycles bubble)
+    event_counters.io.event_signals(43) := f2_clear_bubble
+    event_counters.io.event_signals(44) := f3_clear_bubble
+
+    // 57: dtlb miss
+    event_counters.io.event_signals(57) := Mux(io.lsu.perf.tlbMiss, 1.U, 0.U)
   }
 
   //-------------------------------------------------------------
