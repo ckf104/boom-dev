@@ -42,6 +42,15 @@ class TAGEConfig(params: BoomTageParams = BoomTageParams()) extends Config((site
   case BoomTageKey => params
 })
 
+class PfMSHRNumber(n: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(icache = Some(tp.tileParams.icache.get.copy(
+      pfMSHRNum = n
+    ))))
+    case other => other
+  }
+})
+
 class EnableBoomFlushGHistRestore extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
