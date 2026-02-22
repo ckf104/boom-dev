@@ -42,6 +42,15 @@ class TAGEConfig(params: BoomTageParams = BoomTageParams()) extends Config((site
   case BoomTageKey => params
 })
 
+class EnableBoomFlushGHistRestore extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
+      enableFlushGHistRestore = true
+    )))
+    case other => other
+  }
+})
+
 class WithBoomCommitLogPrintf extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(

@@ -680,6 +680,19 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
       .otherwise {
         io.ifu.redirect_pc := Mux(FlushTypes.useSamePC(flush_typ),
                                   flush_pc, flush_pc_next)
+      // Restore ghist for refetch/next flush types instead of resetting to zero
+      // 没有处理 flush on commit 之后接下一个 fetch packet 这种情况（这时候 history 可能需要移一个 0 才对）
+      if (enableFlushGHistRestore) {
+        val ftq_entry_flush = io.ifu.get_pc(0).entry
+        val flush_pc_lob_r = RegNext(rob.io.flush.bits.pc_lob)
+        val flush_idx = (flush_pc_lob_r ^
+          Mux(ftq_entry_flush.start_bank === 1.U, 1.U << log2Ceil(bankBytes), 0.U))(log2Ceil(fetchWidth), 1)
+        val flush_idx_oh = UIntToOH(flush_idx)
+        val flush_mask = MaskLower(flush_idx_oh)
+        val has_br_before_flush = (flush_mask & ftq_entry_flush.br_mask) =/= 0.U
+        new_ghist.old_history := io.ifu.get_pc(1).ghist.old_history
+        new_ghist.current_saw_branch_not_taken := has_br_before_flush
+      }
       }
     }
     io.ifu.redirect_ftq_idx := RegNext(rob.io.flush.bits.ftq_idx)
@@ -825,7 +838,12 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
   flush_pc_req.bits    := rob.io.flush.bits.ftq_idx
 
   // Mispredict requests (to get the correct target)
-  io.ifu.get_pc(1).ftq_idx := oldest_mispredict_ftq_idx
+  // When ROB flush is valid and enableFlushGHistRestore, steal get_pc(1) to read ghist for the flushing instruction
+  if (enableFlushGHistRestore) {
+    io.ifu.get_pc(1).ftq_idx := Mux(rob.io.flush.valid, rob.io.flush.bits.ftq_idx, oldest_mispredict_ftq_idx)
+  } else {
+    io.ifu.get_pc(1).ftq_idx := oldest_mispredict_ftq_idx
+  }
 
 
   //-------------------------------------------------------------

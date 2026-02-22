@@ -99,6 +99,9 @@ case class BoomCoreParams(
   scontextWidth: Int = 0,
   trace: Boolean = false,
 
+  // When true, restore ghist on refetch/next ROB flush instead of resetting to zero
+  enableFlushGHistRestore: Boolean = false,
+
   /* debug stuff */
   enableCommitLogPrintf: Boolean = false,
   enableBranchPrintf: Boolean = false,
@@ -306,6 +309,8 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
 
   val corePAddrBits = paddrBits
   val corePgIdxBits = pgIdxBits
+
+  val enableFlushGHistRestore = boomParams.enableFlushGHistRestore
 
   //Enable_PerfCounter_Support
   val subECounterNum = 4
