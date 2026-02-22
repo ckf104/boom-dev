@@ -194,6 +194,7 @@ case class BoomTageParams(
   uBitPeriod: Int = 2048
 )
 
+case object BoomTageKey extends Field[BoomTageParams](BoomTageParams())
 
 class TageBranchPredictorBank(params: BoomTageParams = BoomTageParams())(implicit p: Parameters) extends BranchPredictorBank()(p)
 {

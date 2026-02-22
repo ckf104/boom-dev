@@ -23,6 +23,25 @@ import boom.v3.lsu._
 // BOOM Config Fragments
 // ---------------------
 
+class DCacheConfigs(nSet: Int, nWay: Int, nTLB: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(dcache = Some(tp.tileParams.dcache.get.copy(
+      nSets = nSet,
+      nWays = nWay,
+      nTLBWays = nTLB
+    ))))
+    case other => other
+  }
+})
+
+class BTBConfig(nSet: Int = 128, nWay: Int = 2, offsetSz: Int = 13, extendedNSets: Int = 128) extends Config((site, here, up) => {
+  case BoomBTBKey => BoomBTBParams(nSets = nSet, nWays = nWay, offsetSz = offsetSz, extendedNSets = extendedNSets)
+})
+
+class TAGEConfig(params: BoomTageParams = BoomTageParams()) extends Config((site, here, up) => {
+  case BoomTageKey => params
+})
+
 class WithBoomCommitLogPrintf extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
@@ -563,8 +582,8 @@ class WithTAGEBPD extends Config((site, here, up) => {
       localHistoryLength = 1,
       localHistoryNSets = 0,
       branchPredictor = ((resp_in: BranchPredictionBankResponse, p: Parameters) => {
-        val tage = Module(new TageBranchPredictorBank()(p))
-        val btb = Module(new BTBBranchPredictorBank()(p))
+        val tage = Module(new TageBranchPredictorBank(p(BoomTageKey))(p))
+        val btb = Module(new BTBBranchPredictorBank(p(BoomBTBKey))(p))
         val bim = Module(new BIMBranchPredictorBank()(p))
         val ubtb = Module(new FAMicroBTBBranchPredictorBank()(p))
         val ras = Module(new RASBranchPredictorBank()(p))
