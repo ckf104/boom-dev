@@ -116,12 +116,17 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
 
   // How many bits do we intend to fetch at most every cycle?
   val wordBits = outer.icacheParams.fetchBytes*8
-  // Each of these cases require some special-case handling.
-  require (tl_out.d.bits.data.getWidth == wordBits || (2*tl_out.d.bits.data.getWidth == wordBits && nBanks == 2))
-  // If TL refill is half the wordBits size and we have two banks, then the
-  // refill writes to only one bank per cycle (instead of across two banks every
-  // cycle).
-  val refillsToOneBank = (2*tl_out.d.bits.data.getWidth == wordBits)
+  // Require fixed 64-bit fetch width with single bank
+  require (wordBits == 64 && nBanks == 1, s"wordBits must be 64 and nBanks must be 1, got wordBits=$wordBits nBanks=$nBanks")
+  // TL bus width can be 64 bits (same as fetch) or 128 bits (wide refill)
+  val tlDataBits = tl_out.d.bits.data.getWidth
+  require (tlDataBits == wordBits || tlDataBits == 2 * wordBits,
+    s"TL data width must be $wordBits or ${2*wordBits}, got $tlDataBits")
+  // Ensure refillCycles (derived from rowBits) is consistent with TL bus width
+  require (tlDataBits * refillCycles == cacheBlockBytes * 8,
+    s"TL data width ($tlDataBits) * refillCycles ($refillCycles) must equal block bits (${cacheBlockBytes*8})")
+  // When TL bus is wider than fetch width, we split each data SRAM into two sub-banks
+  val refillIsWide = (tlDataBits == 2 * wordBits)
 
 
 
@@ -183,41 +188,18 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
   }
   assert(PopCount(s1_tag_hit) <= 1.U || !s1_valid)
 
-  val ramDepth = if (refillsToOneBank && nBanks == 2) {
-    nSets * refillCycles / 2
-  } else {
-    nSets * refillCycles
-  }
+  val ramDepth = nSets * refillCycles
 
-  val dataArrays = if (nBanks == 1) {
-    // Use unbanked icache for narrow accesses.
-    (0 until nWays).map { x =>
+  if (!refillIsWide) {
+    // TL width == fetch width (64 bits). Single SRAM per way.
+    val dataArrays = (0 until nWays).map { x =>
       DescribedSRAM(
         name = s"dataArrayWay_${x}",
         desc = "ICache Data Array",
         size = ramDepth,
-        data = UInt((wordBits).W)
+        data = UInt(wordBits.W)
       )
     }
-  } else {
-    // Use two banks, interleaved.
-    (0 until nWays).map { x =>
-      DescribedSRAM(
-        name = s"dataArrayB0Way_${x}",
-        desc = "ICache Data Array",
-        size = ramDepth,
-        data = UInt((wordBits/nBanks).W)
-      )} ++
-    (0 until nWays).map { x =>
-      DescribedSRAM(
-        name = s"dataArrayB1Way_${x}",
-        desc = "ICache Data Array",
-        size = ramDepth,
-        data = UInt((wordBits/nBanks).W)
-      )}
-  }
-  if (nBanks == 1) {
-    // Use unbanked icache for narrow accesses.
     s1_bankid := 0.U
     for ((dataArray, i) <- dataArrays.zipWithIndex) {
       def row(addr: UInt) = addr(untagBits-1, blockOffBits-log2Ceil(refillCycles))
@@ -236,71 +218,56 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
         s2_dout(i) := RegNext(dataArray.read(mem_idx, !wen && s0_ren))
     }
   } else {
-    // Use two banks, interleaved.
-    val dataArraysB0 = dataArrays.take(nWays)
-    val dataArraysB1 = dataArrays.drop(nWays)
-    require (nBanks == 2)
+    // TL width (128 bits) is twice the fetch width (64 bits).
+    // Split each way into two sub-banks (B0 = lower 64 bits, B1 = upper 64 bits)
+    // so that each 128-bit TL beat can be written in one cycle.
+    val dataArraysB0 = (0 until nWays).map { x =>
+      DescribedSRAM(
+        name = s"dataArrayB0Way_${x}",
+        desc = "ICache Data Array",
+        size = ramDepth,
+        data = UInt(wordBits.W)
+      )
+    }
+    val dataArraysB1 = (0 until nWays).map { x =>
+      DescribedSRAM(
+        name = s"dataArrayB1Way_${x}",
+        desc = "ICache Data Array",
+        size = ramDepth,
+        data = UInt(wordBits.W)
+      )
+    }
 
-    // Bank0 row's id wraps around if Bank1 is the starting bank.
-    def b0Row(addr: UInt) =
-      if (refillsToOneBank) {
-        addr(untagBits-1, blockOffBits-log2Ceil(refillCycles)+1) + bank(addr)
-      } else {
-        addr(untagBits-1, blockOffBits-log2Ceil(refillCycles)) + bank(addr)
-      }
-    // Bank1 row's id stays the same regardless of which Bank has the fetch address.
-    def b1Row(addr: UInt) =
-      if (refillsToOneBank) {
-        addr(untagBits-1, blockOffBits-log2Ceil(refillCycles)+1)
-      } else {
-        addr(untagBits-1, blockOffBits-log2Ceil(refillCycles))
-      }
-
-    s1_bankid := RegNext(bank(s0_vaddr))
+    // s0_vaddr bit log2(wordBits/8) = bit 3 selects which 64-bit half within
+    // a 128-bit TL beat: 0 -> B0 (lower), 1 -> B1 (upper)
+    s1_bankid := RegNext(s0_vaddr(log2Ceil(wordBits/8)))
 
     for (i <- 0 until nWays) {
+      // Row address: {set_index, beat_within_line}
+      def row(addr: UInt) = addr(untagBits-1, blockOffBits-log2Ceil(refillCycles))
       val s0_ren = s0_valid
-      val wen = (refill_one_beat && !invalidated)&& repl_way === i.U
+      val wen = (refill_one_beat && !invalidated) && repl_way === i.U
 
-      var mem_idx0: UInt = null
-      var mem_idx1: UInt = null
+      // Both sub-banks share the same row index
+      val mem_idx = Mux(refill_one_beat, (refill_idx << log2Ceil(refillCycles)) | refill_cnt,
+                    row(s0_vaddr))
 
-      if (refillsToOneBank) {
-        // write a refill beat across only one beat.
-        mem_idx0 =
-          Mux(refill_one_beat, (refill_idx << (log2Ceil(refillCycles)-1)) | (refill_cnt >> 1.U),
-          b0Row(s0_vaddr))
-        mem_idx1 =
-          Mux(refill_one_beat, (refill_idx << (log2Ceil(refillCycles)-1)) | (refill_cnt >> 1.U),
-          b1Row(s0_vaddr))
-
-        when (wen && refill_cnt(0) === 0.U) {
-          dataArraysB0(i).write(mem_idx0, tl_out.d.bits.data)
-        }
-        when (wen && refill_cnt(0) === 1.U) {
-          dataArraysB1(i).write(mem_idx1, tl_out.d.bits.data)
-        }
-      } else {
-        // write a refill beat across both banks.
-        mem_idx0 =
-          Mux(refill_one_beat, (refill_idx << log2Ceil(refillCycles)) | refill_cnt,
-          b0Row(s0_vaddr))
-        mem_idx1 =
-          Mux(refill_one_beat, (refill_idx << log2Ceil(refillCycles)) | refill_cnt,
-          b1Row(s0_vaddr))
-
-        when (wen) {
-          val data = tl_out.d.bits.data
-          dataArraysB0(i).write(mem_idx0, data(wordBits/2-1, 0))
-          dataArraysB1(i).write(mem_idx1, data(wordBits-1, wordBits/2))
-        }
+      // Write: split 128-bit TL data into two 64-bit halves
+      when (wen) {
+        val data = tl_out.d.bits.data
+        dataArraysB0(i).write(mem_idx, data(wordBits-1, 0))
+        dataArraysB1(i).write(mem_idx, data(2*wordBits-1, wordBits))
       }
+
+      // Read: read both sub-banks, select based on s2_bankid
       if (enableICacheDelay) {
-        s2_dout(i) := Cat(dataArraysB1(i).read(RegNext(mem_idx1), RegNext(!wen && s0_ren)),
-                          dataArraysB0(i).read(RegNext(mem_idx0), RegNext(!wen && s0_ren)))
+        val b0_data = dataArraysB0(i).read(RegNext(mem_idx), RegNext(!wen && s0_ren))
+        val b1_data = dataArraysB1(i).read(RegNext(mem_idx), RegNext(!wen && s0_ren))
+        s2_dout(i) := Mux(RegNext(RegNext(s0_vaddr(log2Ceil(wordBits/8)))), b1_data, b0_data)
       } else {
-        s2_dout(i) := RegNext(Cat(dataArraysB1(i).read(mem_idx1, !wen && s0_ren),
-                                  dataArraysB0(i).read(mem_idx0, !wen && s0_ren)))
+        val b0_data = dataArraysB0(i).read(mem_idx, !wen && s0_ren)
+        val b1_data = dataArraysB1(i).read(mem_idx, !wen && s0_ren)
+        s2_dout(i) := Mux(RegNext(s1_bankid), RegNext(b1_data), RegNext(b0_data))
       }
     }
   }
@@ -309,19 +276,8 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
   val s2_bankid = RegNext(s1_bankid)
   val s2_way_mux = Mux1H(s2_tag_hit, s2_dout)
 
-  val s2_unbanked_data = s2_way_mux
-  val sz = s2_way_mux.getWidth
-  val s2_bank0_data = s2_way_mux(sz/2-1,0)
-  val s2_bank1_data = s2_way_mux(sz-1,sz/2)
-
-  val s2_data =
-    if (nBanks == 2) {
-      Mux(s2_bankid,
-        Cat(s2_bank0_data, s2_bank1_data),
-        Cat(s2_bank1_data, s2_bank0_data))
-    } else {
-      s2_unbanked_data
-    }
+  // s2_dout already contains the correct 64-bit data (bank-selected in refillIsWide case)
+  val s2_data = s2_way_mux
 
   io.resp.bits.ae := DontCare
   io.resp.bits.replay := DontCare
@@ -352,8 +308,9 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
     "Sets          : " + nSets,
     "Ways          : " + nWays,
     "Refill cycles : " + refillCycles,
-    "RAMs          : (" +  wordBits/nBanks + " x " + nSets*refillCycles + ") using " + nBanks + " banks",
-    "" + (if (nBanks == 2) "Dual-banked" else "Single-banked"),
+    "Bus width     : " + tlDataBits,
+    "RAMs          : (" + wordBits + " x " + ramDepth + ") x " + (if (refillIsWide) 2 else 1) + " sub-bank(s) per way",
+    "" + (if (refillIsWide) "Wide-refill (2 sub-banks)" else "Single-bank"),
     "I-TLB ways    : " + cacheParams.nTLBWays + "\n")
 }
 

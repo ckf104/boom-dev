@@ -34,6 +34,16 @@ class DCacheConfigs(nSet: Int, nWay: Int, nTLB: Int) extends Config((site, here,
   }
 })
 
+class BusWidthConfigs(busWidth: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      dcache = Some(tp.tileParams.dcache.get.copy(rowBits = busWidth)),
+      icache = Some(tp.tileParams.icache.get.copy(rowBits = busWidth))
+    ))
+    case other => other
+  }
+})
+
 class BTBConfig(nSet: Int = 128, nWay: Int = 2, offsetSz: Int = 13, extendedNSets: Int = 128) extends Config((site, here, up) => {
   case BoomBTBKey => BoomBTBParams(nSets = nSet, nWays = nWay, offsetSz = offsetSz, extendedNSets = extendedNSets)
 })
