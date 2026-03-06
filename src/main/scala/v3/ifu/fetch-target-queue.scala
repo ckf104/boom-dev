@@ -296,9 +296,7 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
   // bpd_ptr =/= deq_ptr && enq_ptr =/= WrapInc(bpd_ptr, num_entries)
   // 简化为了 bpd_ptr =/= deq_ptr，因为 deq_ptr < enq_ptr 在第一次 commit
   // update 后总是成立，而 bpd_ptr <= deq_ptr
-  val do_commit_update     = (bpd_ptr =/= deq_ptr &&
-                              !io.brupdate.b2.mispredict &&
-                              !io.redirect.valid && !RegNext(io.redirect.valid))
+  val do_commit_update     = (bpd_ptr =/= deq_ptr)
 
   val done_commit_update_debug = RegInit(false.B)
 
