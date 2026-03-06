@@ -222,7 +222,7 @@ class WithNMediumBooms(n: Int = 1) extends Config(
 
 // 移除 loop predictor 的 medium boom
 class WithMyMediumBooms(n: Int = 1) extends Config(
-  new WithTAGEBPD ++ // Default to TAGE BPD
+  new WithTAGEBPD(true) ++ // Default to TAGE BPD
   new Config((site, here, up) => {
     case TilesLocated(InSubsystem) => {
       val prev = up(TilesLocated(InSubsystem), site)
@@ -266,7 +266,7 @@ class WithMyMediumBooms(n: Int = 1) extends Config(
 
 // 移除 loop predictor 的 medium boom
 class WithSimBooms(n: Int = 1) extends Config(
-  new WithTAGEBPD ++ // Default to TAGE BPD
+  new WithTAGEBPD(true) ++ // Default to TAGE BPD
   new Config((site, here, up) => {
     case TilesLocated(InSubsystem) => {
       val prev = up(TilesLocated(InSubsystem), site)
@@ -603,11 +603,11 @@ class WithTAGELBPD extends Config((site, here, up) => {
 })
 
 // 该配置中移除了 Loop Predictor，可以减少很多 corner case
-class WithTAGEBPD extends Config((site, here, up) => {
+class WithTAGEBPD(Loop: Boolean = false) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
       // tage 56, fau btb 8, bim 8, btb 1, meta size 共 73
-      bpdMaxMetaLength = 80,
+      bpdMaxMetaLength = if (Loop) 120 else 80,
       globalHistoryLength = 64,
       localHistoryLength = 1,
       localHistoryNSets = 0,
@@ -624,7 +624,15 @@ class WithTAGEBPD extends Config((site, here, up) => {
         bim.io.resp_in(0)   := ubtb.io.resp
         btb.io.resp_in(0)   := bim.io.resp
         tage.io.resp_in(0)  := btb.io.resp
-        ras.io.resp_in(0)   := tage.io.resp
+        if (Loop) {
+          val loop = Module(new LoopBranchPredictorBank()(p))
+          preds.appended(loop)
+          loop.io := DontCare
+          loop.io.resp_in(0)  := tage.io.resp
+          ras.io.resp_in(0)   := loop.io.resp
+        } else {
+          ras.io.resp_in(0)   := tage.io.resp
+        }
 
         (preds, ras.io.resp)
       })

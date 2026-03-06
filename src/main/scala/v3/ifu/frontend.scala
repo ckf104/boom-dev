@@ -361,7 +361,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   require(fetchWidth*coreInstBytes == outer.icacheParams.fetchBytes)
 
   val bpd = Module(new BranchPredictor)
-  bpd.io.f3_fire := false.B
+  bpd.io.f3_fire := true.B // 解耦前端的 f3 预测不会被阻塞
 
   val icache = outer.icache.module
   icache.io.invalidate := io.cpu.flush_icache
@@ -536,10 +536,6 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f3_bpd_resp.io.enq.bits.ghist_update_type := bpd.io.resp.f3_ghist_update_type
   // 同步运行时预译码阶段不需要做校验
   f3_bpd_resp.io.enq.bits.target := DontCare
-
-  when (f3_bpd_resp.io.enq.fire) {
-    bpd.io.f3_fire := true.B
-  }
 
   f3.io.deq.ready := f4_ready
   f3_bpd_resp.io.deq.ready := f4_ready
