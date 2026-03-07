@@ -17,6 +17,8 @@ case class BoomLoopPredictorParams(
   threshold: Int = 7
 )
 
+case object BoomLoopKey extends Field[Boolean](false)
+
 class LoopBranchPredictorBank(implicit p: Parameters) extends BranchPredictorBank()(p)
 {
   val tagSz = 10
