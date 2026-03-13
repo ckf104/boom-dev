@@ -1714,7 +1714,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     assert (s0_bpd_ftq_idx >= s0_ftq_idx || isFull(s0_bpd_ftq_idx, s0_ftq_idx),
             "BPD s0 ftq idx should never be behind IFU s0 ftq idx")
     val bpd_ahead_limit_number = PlusArg("bpd-ahead-limit", 63, "limit bpd ahead of ifu s0", 6)
-    require(log2Ceil(ftqSz) == 5)
+    require(ftqSz < 60)  // 防止 bpd_ifu_dist 超过 bpd_ahead_limit_number 的上限
 
     when (bpd_ahead_limit_number < bpd_ifu_dist) {
       bpd_ahead_limit := true.B

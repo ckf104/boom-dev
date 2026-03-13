@@ -21,6 +21,7 @@ import chisel3.util._
 
 import org.chipsalliance.cde.config.{Parameters}
 import freechips.rocketchip.util.{Str, PlusArg}
+import freechips.rocketchip.tile.TileKey
 
 import boom.v3.common._
 import boom.v3.exu._
@@ -128,7 +129,7 @@ class GetPCFromFtqIO(implicit p: Parameters) extends BoomBundle
 class FTQPtr(entries: Int)(implicit p: Parameters) extends CircularQueuePtr[FTQPtr](entries)
 {
   // 好像在执行构造函数的时候 trait 内部的代码还未执行，因此这里拿不到 ftqSz
-  def this()(implicit p: Parameters) = this(32)
+  def this()(implicit p: Parameters) = this(p(TileKey).core.asInstanceOf[BoomCoreParams].ftq.nEntries)
   require(ftqSz == entries)
 }
 
