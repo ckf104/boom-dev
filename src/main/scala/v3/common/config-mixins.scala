@@ -34,6 +34,25 @@ class DCacheConfigs(nSet: Int, nWay: Int, nTLB: Int) extends Config((site, here,
   }
 })
 
+class ICacheConfigs(nWay: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(icache = Some(tp.tileParams.icache.get.copy(
+      nWays = nWay
+    ))))
+    case other => other
+  }
+})
+
+class FTQConfigs(nEntries: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
+      ftq = tp.tileParams.core.ftq.copy(nEntries = nEntries)
+    )))
+    case other => other
+  }
+})
+
+
 class BusWidthConfigs(busWidth: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
