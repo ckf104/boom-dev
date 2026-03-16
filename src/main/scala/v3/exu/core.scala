@@ -526,7 +526,7 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
   val f2_clear_bubble = io.ifu.f2_clear_bubble
   val f3_clear_bubble = io.ifu.f3_clear_bubble
 
-  when (startCounter) {
+  when (startCounter && useEventCounter.B) {
     event_counters.io.event_signals(0) :=   1.U  //cycles
     event_counters.io.event_signals(1) :=  RegNext(PopCount(rob.io.commit.arch_valids.asUInt)) // commit inst
     // TODO: 因为 BOOM 前端的 replay 机制，计数器 cache valid access 与 tlb valid access 的值

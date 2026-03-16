@@ -23,6 +23,15 @@ import boom.v3.lsu._
 // BOOM Config Fragments
 // ---------------------
 
+class DisableEventCounter extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
+      useEventCounter = false
+    )))
+    case other => other
+  }
+})
+
 class DCacheConfigs(nSet: Int, nWay: Int, nTLB: Int) extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(dcache = Some(tp.tileParams.dcache.get.copy(
