@@ -533,7 +533,7 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
     // jal 在至多在 f3 阶段就能确定跳转目标
   }
 
-  when (startCounter) {
+  when (startCounter && useEventCounter.B) {
     event_counters.io.event_signals(0) :=   1.U  //cycles
     event_counters.io.event_signals(1) :=  RegNext(PopCount(rob.io.commit.arch_valids.asUInt)) // commit inst
     // TODO: 因为 BOOM 前端的 replay 机制，计数器 cache valid access 与 tlb valid access 的值

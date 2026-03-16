@@ -107,6 +107,7 @@ case class BoomCoreParams(
   enableFlushGHistRestore: Boolean = false,
 
   /* debug stuff */
+  useEventCounter: Boolean = true,
   enableCommitLogPrintf: Boolean = false,
   enableBranchPrintf: Boolean = false,
   enableMemtracePrintf: Boolean = false,
@@ -299,6 +300,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
 
   //***********************************
   // Debug printout parameters
+  val useEventCounter     = boomParams.useEventCounter // use the event counter infrastructure to track events in the core, for performance analysis
   val COMMIT_LOG_PRINTF   = boomParams.enableCommitLogPrintf // dump commit state, for comparision against ISA sim
   val BRANCH_PRINTF       = boomParams.enableBranchPrintf // dump branch predictor results
   val MEMTRACE_PRINTF     = boomParams.enableMemtracePrintf // dump trace of memory accesses to L1D for debugging
