@@ -85,6 +85,15 @@ trait ScalarOpConstants
   val BSRC_3 = 2.U(BSRC_SZ.W) // 3-cycle branch pred
   val BSRC_C = 3.U(BSRC_SZ.W) // core branch resolution
 
+  // ICache miss-stall cause classification
+  val IC_MISS_CAUSE_SZ = 3
+  val IC_MISS_SEQ       = 0.U(IC_MISS_CAUSE_SZ.W)
+  val IC_MISS_COND      = 1.U(IC_MISS_CAUSE_SZ.W)
+  val IC_MISS_JAL       = 2.U(IC_MISS_CAUSE_SZ.W)
+  val IC_MISS_JALR      = 3.U(IC_MISS_CAUSE_SZ.W)
+  val IC_MISS_RET       = 4.U(IC_MISS_CAUSE_SZ.W)
+  val IC_MISS_EXCEPTION = 5.U(IC_MISS_CAUSE_SZ.W)
+
   val GHR_UPDATE_SZ = 2
   val NO_SHIFT_CONST = 0
   val SHIFT_ZERO_CONST = 1

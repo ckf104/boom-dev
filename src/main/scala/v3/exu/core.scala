@@ -519,6 +519,14 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
   val s2_replay_itlb_miss = io.ifu.s2_replay_itlb_miss
   val s2_replay_ic_miss   = io.ifu.s2_replay_ic_miss
 
+  // Frontend 6-category ICache miss-stall cycle accounting (12-bit per category)
+  val ic_miss_stall_seq       = io.ifu.ic_miss_stall_seq
+  val ic_miss_stall_cond      = io.ifu.ic_miss_stall_cond
+  val ic_miss_stall_jal       = io.ifu.ic_miss_stall_jal
+  val ic_miss_stall_jalr      = io.ifu.ic_miss_stall_jalr
+  val ic_miss_stall_ret       = io.ifu.ic_miss_stall_ret
+  val ic_miss_stall_exception = io.ifu.ic_miss_stall_exception
+
   // Frontend s0 stall statistics from frontend
   val s0_not_valid = io.ifu.s0_not_valid
 
@@ -529,14 +537,14 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
   when (startCounter && useEventCounter.B) {
     event_counters.io.event_signals(0) :=   1.U  //cycles
     event_counters.io.event_signals(1) :=  RegNext(PopCount(rob.io.commit.arch_valids.asUInt)) // commit inst
-    // TODO: 因为 BOOM 前端的 replay 机制，计数器 cache valid access 与 tlb valid access 的值
-    // 会比实际的多，但 hit number 是准的，实际的 access time = hit number + perf miss？
-    // 但这还是有点微妙，例如 icache miss 但 itlb hit 的情况，replay 会导致 itlb 反复 hit
-    event_counters.io.event_signals(2) :=  Mux(io.ifu.icache_valid_access, 1.U, 0.U) //i-cache valid access number
-    event_counters.io.event_signals(3) :=  Mux(io.ifu.icache_hit, 1.U, 0.U)  //icache hit number
+    // 6 类 ICache miss stall 周期统计（每类 12-bit，在 core 内拆分为 3 个 4-bit 累加）
+    // seq: 2/3/5
+    event_counters.io.event_signals(2) :=  ic_miss_stall_seq(3,0)
+    event_counters.io.event_signals(3) :=  ic_miss_stall_seq(7,4)
     event_counters.io.event_signals(4) :=  Mux(io.ifu.perf.acquire, 1.U, 0.U) //i-cache send req to next level cache
-    event_counters.io.event_signals(5) :=  Mux(io.ifu.itlb_valid_access, 1.U, 0.U) //itlb valid access number
-    event_counters.io.event_signals(6) :=  Mux(io.ifu.itlb_hit, 1.U, 0.U) //itlb hit number
+    event_counters.io.event_signals(5) :=  ic_miss_stall_seq(11,8)
+    // cond: 6/20/21
+    event_counters.io.event_signals(6) :=  ic_miss_stall_cond(3,0)
     event_counters.io.event_signals(7) :=  Mux(io.ifu.perf.tlbMiss, 1.U, 0.U) //i-tlb start ptw
 
     event_counters.io.event_signals(8) :=  PopCount(com_is_br.asUInt)       //committed br number
@@ -548,24 +556,21 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
     event_counters.io.event_signals(14) :=  PopCount(com_misp_jalr.asUInt)   //committed misp jalr number
     event_counters.io.event_signals(15) :=  PopCount(com_misp_ret.asUInt)     //committed misp jalr-ret number
 
-    event_counters.io.event_signals(16) :=  PopCount(com_is_bsrc1.asUInt) // committed inst from f1 prediction
-    event_counters.io.event_signals(17) :=  PopCount(com_is_bsrc2.asUInt) // committed inst from f2 prediction
-    event_counters.io.event_signals(18) :=  PopCount(com_is_bsrc3.asUInt) // committed inst from f3 prediction
+    // exception: 16/17/18
+    event_counters.io.event_signals(16) :=  ic_miss_stall_exception(3,0)
+    event_counters.io.event_signals(17) :=  ic_miss_stall_exception(7,4)
+    event_counters.io.event_signals(18) :=  ic_miss_stall_exception(11,8)
     event_counters.io.event_signals(19) :=  PopCount(com_is_bsrcc.asUInt) // committed inst from backend correction
 
-    // Fetch buffer enqueue profiling
-    // 20: no enqueue this cycle
-    // 21: enqueue with 0 instructions
-    // 22: enqueue with 1 instruction
-    // 23: enqueue with 2 instructions
-    // 24: enqueue with 3 instructions
-    // 25: enqueue with 4 instructions
-    event_counters.io.event_signals(20) := Mux(!fb_enq_fire, 1.U, 0.U)
-    event_counters.io.event_signals(21) := Mux(fb_enq_fire && fb_enq_cnt === 0.U, 1.U, 0.U)
-    event_counters.io.event_signals(22) := Mux(fb_enq_fire && fb_enq_cnt === 1.U, 1.U, 0.U)
-    event_counters.io.event_signals(23) := Mux(fb_enq_fire && fb_enq_cnt === 2.U, 1.U, 0.U)
-    event_counters.io.event_signals(24) := Mux(fb_enq_fire && fb_enq_cnt === 3.U, 1.U, 0.U)
-    event_counters.io.event_signals(25) := Mux(fb_enq_fire && fb_enq_cnt === 4.U, 1.U, 0.U)
+    // cond: 6/20/21
+    event_counters.io.event_signals(20) := ic_miss_stall_cond(7,4)
+    event_counters.io.event_signals(21) := ic_miss_stall_cond(11,8)
+    // jal: 22/23/24
+    event_counters.io.event_signals(22) := ic_miss_stall_jal(3,0)
+    event_counters.io.event_signals(23) := ic_miss_stall_jal(7,4)
+    event_counters.io.event_signals(24) := ic_miss_stall_jal(11,8)
+    // jalr: 25/59/60
+    event_counters.io.event_signals(25) := ic_miss_stall_jalr(3,0)
 
     // Frontend s2 replay statistics
     // 26: all s2 replays
@@ -600,6 +605,13 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
 
     // 57: dtlb miss
     event_counters.io.event_signals(57) := Mux(io.lsu.perf.tlbMiss, 1.U, 0.U)
+
+    event_counters.io.event_signals(59) := ic_miss_stall_jalr(7,4)
+    event_counters.io.event_signals(60) := ic_miss_stall_jalr(11,8)
+    // ret: 61/62/63
+    event_counters.io.event_signals(61) := ic_miss_stall_ret(3,0)
+    event_counters.io.event_signals(62) := ic_miss_stall_ret(7,4)
+    event_counters.io.event_signals(63) := ic_miss_stall_ret(11,8)
   }
 
   //-------------------------------------------------------------

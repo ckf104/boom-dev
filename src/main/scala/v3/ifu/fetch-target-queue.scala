@@ -67,6 +67,9 @@ class FTQBundle(implicit p: Parameters) extends BoomBundle
   // btb 将非分支指令或者非指令预测为了分支指令
   val btb_mispredicts = UInt(fetchWidth.W)
 
+  // fetch packet 是否引发了 rob flush
+  val has_exp = Bool()
+
   // Which bank did this start from?
   val start_bank = UInt(1.W)
 
@@ -150,6 +153,8 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     val brupdate = Input(new BrUpdateInfo)
 
     val bpdupdate = Output(Valid(new BranchPredictionUpdate))
+    val last_commit_cfi_type = Output(UInt(IC_MISS_CAUSE_SZ.W))
+    val commit_ic_stall_cycles = Output(UInt(12.W))
 
     val ras_update = Output(Bool())
     val ras_update_idx = Output(UInt(log2Ceil(nRasEntries).W))
@@ -172,6 +177,9 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
   } else {
     None
   }
+
+  // 统计每个 fetch packet 的 icache miss stall cycle 数
+  val icache_stall_cycles = SyncReadMem(num_entries, UInt(12.W))
 
   val do_enq = io.enq.fire
 
@@ -199,6 +207,7 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     new_entry.ras_idx       := io.enq.bits.ghist.ras_idx
     new_entry.br_mask       := io.enq.bits.br_mask
     new_entry.btb_mispredicts := io.enq.bits.btb_mispredicts
+    new_entry.has_exp       := false.B
     new_entry.start_bank    := bank(io.enq.bits.pc)
 
     val new_ghist = io.enq.bits.ghist
@@ -207,6 +216,7 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     ghist.map( g => g.write(enq_ptr.value, new_ghist))
     meta.write(enq_ptr.value, io.enq.bits.bpd_meta)
     ram(enq_ptr.value) := new_entry
+    icache_stall_cycles.write(enq_ptr.value, io.enq.bits.ic_miss_stall_cycles)
 
     prev_pc    := io.enq.bits.pc
     prev_entry := new_entry
@@ -264,6 +274,8 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
   }
   val bpd_meta  = meta.read(bpd_idx, true.B) // TODO fix these SRAMs
   val bpd_pc    = RegNext(pcs(bpd_idx))
+  val com_ic_stall_cycles = icache_stall_cycles.read(bpd_idx, true.B)
+  io.commit_ic_stall_cycles := com_ic_stall_cycles
   // TODO: 不怎么写不知道为啥 verilator 那边模拟的时候显示
   // 当 bpd_ptr == 31 时做 commit update 会有问题，波形图
   // 显示输出的 bpd_target 为 0，不知道是不是 verilator 的 bug？
@@ -352,6 +364,26 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     bpd_ptr := bpd_ptr + 1.U
   }
 
+  val last_commit_cfi_type = RegInit(IC_MISS_SEQ)
+  io.last_commit_cfi_type := last_commit_cfi_type
+  when (io.bpdupdate.valid && io.bpdupdate.bits.is_commit_update) {
+    // 如果发生了异常
+    when (bpd_entry.has_exp) {
+      last_commit_cfi_type := IC_MISS_EXCEPTION
+    // 如果没有控制流指令或者控制流指令最终没有 taken
+    } .elsewhen(!bpd_entry.cfi_idx.valid || !bpd_entry.cfi_taken) {
+      last_commit_cfi_type := IC_MISS_SEQ
+    } .elsewhen(bpd_entry.cfi_type === CFI_JAL) {
+      last_commit_cfi_type := IC_MISS_JAL
+    } .elsewhen(bpd_entry.cfi_type === CFI_BR) {
+      last_commit_cfi_type := IC_MISS_COND
+    } .elsewhen(bpd_entry.cfi_is_ret) {
+      last_commit_cfi_type := IC_MISS_RET
+    } .otherwise {
+      last_commit_cfi_type := IC_MISS_JALR
+    }
+  }
+
   // 因为 ghist 用的 sync read mem，文档里说不能在同一周期读和写相同地址
   // 因此这里就保守一些，在 ftq 满的时候就拉低 ready 信号，即使这周期的
   // do_commit_update 信号为 true
@@ -381,6 +413,7 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
       // 因此需要在 rob flush 时，修正 cfi_idx 和 br_mask
       redirect_new_entry.br_mask := MaskLower(UIntToOH(new_cfi_idx)) & redirect_entry.br_mask
       redirect_new_entry.cfi_idx.valid    := false.B
+      redirect_new_entry.has_exp          := true.B
     } .elsewhen (io.brupdate.b2.mispredict) {
     val new_cfi_idx = (io.brupdate.b2.uop.pc_lob ^
       Mux(redirect_entry.start_bank === 1.U, 1.U << log2Ceil(bankBytes), 0.U))(log2Ceil(fetchWidth), 1)
