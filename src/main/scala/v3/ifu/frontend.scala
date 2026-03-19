@@ -600,7 +600,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val s1_pf_ifu_dist = RegNext(pf_ifu_dist)
   val s1_pf_ahead_ifu = RegNext(pf_ahead_ifu)
   val pf_dist_bucket = Wire(UInt(3.W))
-  when (pf_ifu_dist <= 1.U) {
+  when (pf_ifu_dist <= 1.U || !pf_ahead_ifu) {
     pf_dist_bucket := 0.U
   } .elsewhen (pf_ifu_dist <= 3.U) {
     pf_dist_bucket := 1.U
