@@ -70,6 +70,9 @@ class FTQBundle(implicit p: Parameters) extends BoomBundle
   // fetch packet 的来源
   val ft_tsrc = UInt(BSRC_SZ.W)
 
+  // fetch packet 是否引发了 rob flush
+  val has_exp = Bool()
+
   // Which bank did this start from?
   val start_bank = UInt(1.W)
 
@@ -203,6 +206,8 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     val brupdate = Input(new BrUpdateInfo)
 
     val bpdupdate = Output(Valid(new BranchPredictionUpdate))
+    val last_commit_cfi_type = Output(UInt(IC_MISS_CAUSE_SZ.W))
+    val commit_ic_stall_cycles = Output(UInt(12.W))
 
     val ras_update = Output(Bool())
     val ras_update_idx = Output(UInt(log2Ceil(nRasEntries).W))
@@ -224,6 +229,9 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
   val ram      = Reg(Vec(num_entries, new FTQBundle))
   val ghist    = Seq.fill(3) { SyncReadMem(num_entries, new GlobalHistory) }
   val preds_info = SyncReadMem(num_entries, new FTQPredsInfo)
+
+  // 统计每个 fetch packet 的 icache miss stall cycle 数
+  val icache_stall_cycles = SyncReadMem(num_entries, UInt(12.W))
 
   // 处理 f3 preds enq
   val do_f3_preds_enq        = io.f3_preds_enq.valid
@@ -355,6 +363,7 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     new_entry.br_mask       := io.predecode_enq.bits.br_mask
     new_entry.btb_mispredicts := io.predecode_enq.bits.btb_mispredicts
     new_entry.ft_tsrc       := io.predecode_enq.bits.tsrc
+    new_entry.has_exp       := false.B
     new_entry.start_bank    := bank(io.predecode_enq.bits.pc)
 
     val new_ghist = io.predecode_enq.bits.ghist
@@ -364,6 +373,8 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     prev_pc    := io.predecode_enq.bits.pc
     prev_entry := new_entry
     prev_ghist := new_ghist
+
+    icache_stall_cycles.write(predecode_enq_ptr.value, io.predecode_enq.bits.ic_miss_stall_cycles)
 
     next_predecode_enq_ptr_debug := next_predecode_enq_ptr_debug + 1.U
   }
@@ -410,6 +421,9 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
 
   val bpd_meta  = meta.read(bpd_idx, true.B) // TODO fix these SRAMs
   val bpd_pc    = RegNext(pcs(bpd_idx))
+
+  val com_ic_stall_cycles = icache_stall_cycles.read(bpd_idx, true.B)
+  io.commit_ic_stall_cycles := com_ic_stall_cycles
   // TODO: 不怎么写不知道为啥 verilator 那边模拟的时候显示
   // 当 bpd_ptr == 31 时做 commit update 会有问题，波形图
   // 显示输出的 bpd_target 为 0，不知道是不是 verilator 的 bug？
@@ -504,6 +518,26 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     bpd_commit_ptr := bpd_commit_ptr + 1.U
   }
 
+  val last_commit_cfi_type = RegInit(IC_MISS_SEQ)
+  io.last_commit_cfi_type := last_commit_cfi_type
+  when (io.bpdupdate.valid && io.bpdupdate.bits.is_commit_update) {
+    // 如果发生了异常
+    when (bpd_entry.has_exp) {
+      last_commit_cfi_type := IC_MISS_EXCEPTION
+    // 如果没有控制流指令或者控制流指令最终没有 taken
+    } .elsewhen(!bpd_entry.cfi_idx.valid || !bpd_entry.cfi_taken) {
+      last_commit_cfi_type := IC_MISS_SEQ
+    } .elsewhen(bpd_entry.cfi_type === CFI_JAL) {
+      last_commit_cfi_type := IC_MISS_JAL
+    } .elsewhen(bpd_entry.cfi_type === CFI_BR) {
+      last_commit_cfi_type := IC_MISS_COND
+    } .elsewhen(bpd_entry.cfi_is_ret) {
+      last_commit_cfi_type := IC_MISS_RET
+    } .otherwise {
+      last_commit_cfi_type := IC_MISS_JALR
+    }
+  }
+
   // 因为 ghist 用的 sync read mem，文档里说不能在同一周期读和写相同地址
   // 因此这里就保守一些，在 ftq 满的时候就拉低 ready 信号，即使这周期的
   // do_commit_update 信号为 true
@@ -540,6 +574,7 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
       // 因此需要在 rob flush 时，修正 cfi_idx 和 br_mask
       redirect_new_entry.br_mask := MaskLower(UIntToOH(new_cfi_idx)) & redirect_entry.br_mask
       redirect_new_entry.cfi_idx.valid    := false.B
+      redirect_new_entry.has_exp          := true.B
     } .elsewhen (io.brupdate.b2.mispredict) {
     val new_cfi_idx = (io.brupdate.b2.uop.pc_lob ^
       Mux(redirect_entry.start_bank === 1.U, 1.U << log2Ceil(bankBytes), 0.U))(log2Ceil(fetchWidth), 1)

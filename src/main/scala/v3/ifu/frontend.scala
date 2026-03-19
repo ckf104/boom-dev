@@ -248,6 +248,9 @@ class FetchBundle(implicit p: Parameters) extends BoomBundle
   val fsrc    = UInt(BSRC_SZ.W)
   // Source of the prediction to this bundle
   val tsrc    = UInt(BSRC_SZ.W)
+
+  // ICache miss-stall cycles carried with this fetch packet.
+  val ic_miss_stall_cycles = UInt(12.W)
 }
 
 
@@ -310,6 +313,14 @@ class BoomFrontendIO(implicit p: Parameters) extends BoomBundle
   val s2_replay_total   = Input(Bool())
   val s2_replay_itlb_miss = Input(Bool())
   val s2_replay_ic_miss   = Input(Bool())
+
+  // ICache miss-stall cycles split by cause (frontend accumulates by packet, core does nibble mapping).
+  val ic_miss_stall_seq       = Input(UInt(12.W))
+  val ic_miss_stall_cond      = Input(UInt(12.W))
+  val ic_miss_stall_jal       = Input(UInt(12.W))
+  val ic_miss_stall_jalr      = Input(UInt(12.W))
+  val ic_miss_stall_ret       = Input(UInt(12.W))
+  val ic_miss_stall_exception = Input(UInt(12.W))
 
   // Fetch buffer enqueue monitor (for perf counters)
   val fb_enq_valid      = Input(Bool())
@@ -552,6 +563,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val s0_ifu_tsrc  = WireInit(s0_ifu_tsrc_reg)
   val s0_ifu_tsrc_debug = WireInit(s0_ifu_tsrc_debug_reg)
   val s0_is_replay = WireInit(false.B)
+  val s0_is_real_replay = WireInit(false.B) // s0_is_replay 用于标识物理地址是否可用
+  val s0_replay_is_ic_miss = WireInit(false.B)
   val s0_is_sfence = WireInit(false.B)
   val s0_replay_resp = Wire(new TLBResp(log2Ceil(fetchBytes)))
   val s0_replay_ppc  = Wire(UInt())
@@ -682,6 +695,19 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val s1_ifu_tsrc  = RegNext(s0_ifu_tsrc)
   val s1_ghist     = RegNext(s0_bpd_ghist)
   val s1_is_replay = RegNext(s0_is_replay)
+  val s2_ic_miss_stall_cycles = RegInit(0.U(12.W))
+  val s1_ic_miss_stall_cycles = RegInit(0.U(12.W))
+  when (!s0_is_real_replay) {
+    s1_ic_miss_stall_cycles := 0.U
+  } .elsewhen (!s0_replay_is_ic_miss) {
+    s1_ic_miss_stall_cycles := s2_ic_miss_stall_cycles
+  } .otherwise {
+    s1_ic_miss_stall_cycles := Mux(
+      s2_ic_miss_stall_cycles === ((1 << 12) - 1).U,
+      ((1 << 12) - 1).U,
+      s2_ic_miss_stall_cycles + 1.U)
+  }
+  s2_ic_miss_stall_cycles := s1_ic_miss_stall_cycles
   val f1_clear     = WireInit(false.B)
   val bpd_f1_clear = WireInit(false.B)
 
@@ -810,6 +836,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f3_fetch_bundle.xcpt_ae_if := f3_imemresp.xcpt.ae.inst
   f3_fetch_bundle.fsrc := f3_bpd_resp.io.deq.bits.fsrc
   f3_fetch_bundle.tsrc := f3_imemresp.tsrc
+  f3_fetch_bundle.ic_miss_stall_cycles := s2_ic_miss_stall_cycles
   f3_fetch_bundle.shadowed_mask := f3_shadowed_mask
 
   // Tracks trailing 16b of previous fetch packet
@@ -1213,6 +1240,24 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f4.io.enq.bits  := f3_fetch_bundle
   f4.io.deq.ready := fb.io.enq.ready && !f4_delay
 
+  io.cpu.ic_miss_stall_seq       := 0.U
+  io.cpu.ic_miss_stall_cond      := 0.U
+  io.cpu.ic_miss_stall_jal       := 0.U
+  io.cpu.ic_miss_stall_jalr      := 0.U
+  io.cpu.ic_miss_stall_ret       := 0.U
+  io.cpu.ic_miss_stall_exception := 0.U
+
+  when (ftq.io.bpdupdate.valid && ftq.io.bpdupdate.bits.is_commit_update) {
+    switch (ftq.io.last_commit_cfi_type) {
+      is (IC_MISS_SEQ)       { io.cpu.ic_miss_stall_seq       := ftq.io.commit_ic_stall_cycles }
+      is (IC_MISS_COND)      { io.cpu.ic_miss_stall_cond      := ftq.io.commit_ic_stall_cycles }
+      is (IC_MISS_JAL)       { io.cpu.ic_miss_stall_jal       := ftq.io.commit_ic_stall_cycles }
+      is (IC_MISS_JALR)      { io.cpu.ic_miss_stall_jalr      := ftq.io.commit_ic_stall_cycles }
+      is (IC_MISS_RET)       { io.cpu.ic_miss_stall_ret       := ftq.io.commit_ic_stall_cycles }
+      is (IC_MISS_EXCEPTION) { io.cpu.ic_miss_stall_exception := ftq.io.commit_ic_stall_cycles }
+    }
+  }
+
   fb.io.enq.valid := f4.io.deq.valid && !f4_delay
   fb.io.enq.bits  := f4.io.deq.bits
   fb.io.enq.bits.sfbs    := Mux(f4_sfb_valid, UIntToOH(f4_sfb_idx), 0.U(fetchWidth.W)).asBools
@@ -1582,6 +1627,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     s0_ifu_vpc   := s2_vpc
     s0_ftq_idx   := Mux(f3_enq_fire, s2_ftq_idx + 1.U, s2_ftq_idx)
     s0_is_replay := !s2_tlb_miss
+    s0_is_real_replay := true.B
+    s0_replay_is_ic_miss := !s2_tlb_miss && !icache.io.resp.valid
     s0_ifu_tsrc  := s2_ifu_tsrc
     s0_ifu_tsrc_debug := IFU_S0_SRC_S2_REPLAY_DEBUG
   }
@@ -1591,6 +1638,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     s0_ifu_vpc   := io.cpu.sfence.bits.addr
     s0_ftq_idx   := s0_ifu_ftq_idx_reg
     s0_is_replay := false.B
+    s0_is_real_replay := false.B
+    s0_replay_is_ic_miss := false.B
 
     s0_is_sfence := true.B
     s0_ifu_tsrc_debug := IFU_S0_SRC_SFENCE_DEBUG
@@ -1599,6 +1648,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     s0_ifu_vpc   := io.cpu.redirect_pc
     s0_ftq_idx   := Mux(io.cpu.redirect_val, ftq.io.redirect_ftq_idx + 1.U, s0_ifu_ftq_idx_reg)
     s0_is_replay := false.B
+    s0_is_real_replay := false.B
+    s0_replay_is_ic_miss := false.B
     s0_ifu_tsrc  := BSRC_C
     s0_ifu_tsrc_debug := IFU_S0_SRC_REDIRECT_DEBUG
   }
