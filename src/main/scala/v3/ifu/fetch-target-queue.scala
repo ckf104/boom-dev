@@ -206,6 +206,7 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
     val brupdate = Input(new BrUpdateInfo)
 
     val bpdupdate = Output(Valid(new BranchPredictionUpdate))
+    val update_miss_counter = Output(Bool())
     val last_commit_cfi_type = Output(UInt(IC_MISS_CAUSE_SZ.W))
     val commit_ic_stall_cycles = Output(UInt(12.W))
 
@@ -520,7 +521,9 @@ class FetchTargetQueue(implicit p: Parameters) extends BoomModule
 
   val last_commit_cfi_type = RegInit(IC_MISS_SEQ)
   io.last_commit_cfi_type := last_commit_cfi_type
-  when (io.bpdupdate.valid && io.bpdupdate.bits.is_commit_update) {
+  io.update_miss_counter := false.B
+  when (RegNext(do_commit_update)) {
+    io.update_miss_counter := true.B
     // 如果发生了异常
     when (bpd_entry.has_exp) {
       last_commit_cfi_type := IC_MISS_EXCEPTION
