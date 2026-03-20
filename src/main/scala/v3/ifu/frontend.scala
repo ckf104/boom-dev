@@ -35,6 +35,9 @@ class FrontendResp(implicit p: Parameters) extends BoomBundle()(p) {
   val mask = UInt(fetchWidth.W)
   val xcpt = new FrontendExceptions
   val tsrc = UInt(BSRC_SZ.W)
+
+  // ICache miss-stall cycles carried with this frontend response.
+  val ic_miss_stall_cycles = UInt(12.W)
 }
 
 class GlobalHistory(implicit p: Parameters) extends BoomBundle()(p)
@@ -787,6 +790,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f3.io.enq.bits.mask := fetchMask(s2_vpc)
   f3.io.enq.bits.xcpt := s2_tlb_resp
   f3.io.enq.bits.tsrc := s2_ifu_tsrc
+  f3.io.enq.bits.ic_miss_stall_cycles := s2_ic_miss_stall_cycles
 
   f3_enq_fire := f3.io.enq.fire
   icache.io.f3_enq_fire := f3_enq_fire
@@ -836,7 +840,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f3_fetch_bundle.xcpt_ae_if := f3_imemresp.xcpt.ae.inst
   f3_fetch_bundle.fsrc := f3_bpd_resp.io.deq.bits.fsrc
   f3_fetch_bundle.tsrc := f3_imemresp.tsrc
-  f3_fetch_bundle.ic_miss_stall_cycles := s2_ic_miss_stall_cycles
+  f3_fetch_bundle.ic_miss_stall_cycles := f3_imemresp.ic_miss_stall_cycles
   f3_fetch_bundle.shadowed_mask := f3_shadowed_mask
 
   // Tracks trailing 16b of previous fetch packet
