@@ -992,7 +992,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   io.cpu.ic_miss_stall_jalr      := 0.U
   io.cpu.ic_miss_stall_ret       := 0.U
   io.cpu.ic_miss_stall_exception := 0.U
-  when (ftq.io.bpdupdate.valid && ftq.io.bpdupdate.bits.is_commit_update) {
+  when (ftq.io.update_miss_counter) {
     switch (ftq.io.last_commit_cfi_type) {
       is (IC_MISS_SEQ)       { io.cpu.ic_miss_stall_seq       := ftq.io.commit_ic_stall_cycles }
       is (IC_MISS_COND)      { io.cpu.ic_miss_stall_cond      := ftq.io.commit_ic_stall_cycles }
