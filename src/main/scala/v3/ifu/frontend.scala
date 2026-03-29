@@ -296,6 +296,10 @@ class BoomFrontendIO(implicit p: Parameters) extends BoomBundle
   val rob_flush = Output(Bool()) // Flush coming from the ROB
   val rob_flush_pc_lob     = Output(UInt(log2Ceil(icBlockBytes).W))
 
+  // 分支预测错误的指令是否为 call 指令，以及 call 的返回地址
+  val redirect_is_call          = Output(Bool())
+  val redirect_call_return_addr = Output(UInt())
+
   val commit = Valid(UInt(ftqSz.W))
 
   val flush_icache = Output(Bool())
@@ -1121,6 +1125,15 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     // 后端重定向更新 ras top 指针的内容
     bpd.io.backend_ras_top_update_valid := true.B
     bpd.io.backend_ras_top_update_idx  := io.cpu.redirect_ghist.ras_idx
+
+    // 如果预测错误的指令是 call 指令，在第一周期将 call 的返回地址
+    // 写入 RAS 新栈顶（redirect_ghist.ras_idx）。第二周期 FTQ 的
+    // ras_update 会修复旧栈顶的内容，二者不冲突
+    when (io.cpu.redirect_is_call && enableRasTopRepair.B) {
+      bpd.io.backend_ras_update_valid := true.B
+      bpd.io.backend_ras_update_idx  := io.cpu.redirect_ghist.ras_idx
+      bpd.io.backend_ras_update_addr := io.cpu.redirect_call_return_addr
+    }
   }
 
   ftq.io.debug_ftq_idx := io.cpu.debug_ftq_idx

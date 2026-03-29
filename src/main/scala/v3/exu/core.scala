@@ -623,6 +623,8 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
   io.ifu.redirect_flush       := false.B
   io.ifu.rob_flush            := false.B
   io.ifu.rob_flush_pc_lob     := 0.U
+  io.ifu.redirect_is_call          := false.B
+  io.ifu.redirect_call_return_addr := DontCare
 
   // Breakpoint info
   io.ifu.status  := csr.io.status
@@ -744,6 +746,9 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
       ftq_ghist,
       next_ghist)
     io.ifu.redirect_ghist.current_saw_branch_not_taken := use_same_ghist
+
+    io.ifu.redirect_is_call          := ftq_entry.cfi_is_call && ftq_entry.cfi_idx.bits === cfi_idx
+    io.ifu.redirect_call_return_addr := npc
   } .elsewhen (rob.io.flush_frontend || brupdate.b1.mispredict_mask =/= 0.U) {
     io.ifu.redirect_flush   := true.B
   }
