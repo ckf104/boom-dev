@@ -62,7 +62,9 @@ class BTBConfig(nSet: Int = 128, nWay: Int = 2, offsetSz: Int = 13, extendedNSet
 
 class TAGEConfig(params: BoomTageParams = BoomTageParams()) extends Config((_,_,_) => PartialFunction.empty)
 
-class UseLoopConfig(useLoop: Boolean) extends Config((_,_,_) => PartialFunction.empty)
+class UseLoopConfig(useLoop: Boolean) extends Config((site, here, up) => {
+  case BoomLoopKey => useLoop
+})
 
 class PfMSHRNumber(n: Int) extends Config((_,_,_) => PartialFunction.empty)
 
@@ -560,7 +562,7 @@ class WithTAGEBPD extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
       // tage 56, fau btb 8, bim 8, btb 1, meta size 共 73
-      bpdMaxMetaLength = 80,
+      bpdMaxMetaLength = if (site(BoomLoopKey)) 120 else 80,
       globalHistoryLength = 64,
       localHistoryLength = 1,
       localHistoryNSets = 0,
@@ -577,7 +579,16 @@ class WithTAGEBPD extends Config((site, here, up) => {
         btb.io.resp_in(0)   := bim.io.resp
         tage.io.resp_in(0)  := btb.io.resp
 
-        (preds, tage.io.resp)
+        val useLoop = p(BoomLoopKey)
+        if (useLoop) {
+          val loop = Module(new LoopBranchPredictorBank()(p))
+          val predsWithLoop = preds.appended(loop)
+          loop.io := DontCare
+          loop.io.resp_in(0) := tage.io.resp
+          (predsWithLoop, loop.io.resp)
+        } else {
+          (preds, tage.io.resp)
+        }
       })
     )))
     case other => other
