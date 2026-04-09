@@ -470,6 +470,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val io_reset_vector = outer.resetVectorSinkNode.bundle
   implicit val edge = outer.masterNode.edges.out(0)
   require(fetchWidth*coreInstBytes == outer.icacheParams.fetchBytes)
+  require(enablePfPipeline || outer.icacheParams.pfMSHRNum == 0,
+    "When prefetch pipeline is disabled, icache pfMSHRNum must be 0")
 
   val bpd = Module(new BranchPredictor)
   bpd.io.f3_fire := true.B // 解耦前端 f3 预测不会被阻塞
@@ -656,9 +658,11 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val s1_pf_replay_ppc = Reg(UInt(paddrBits.W))
   val s1_pf_replay_exp = Reg(Bool())
 
-  tlb.io.req.valid      := (s1_pf_valid && !f1_pf_clear && !s1_pf_replay) || s1_is_sfence
+  if (enablePfPipeline) {
+    tlb.io.req.valid      := (s1_pf_valid && !f1_pf_clear && !s1_pf_replay) || s1_is_sfence
+    tlb.io.req.bits.vaddr := s1_pf_vpc
+  }
   tlb.io.req.bits.cmd   := DontCare
-  tlb.io.req.bits.vaddr := s1_pf_vpc
   tlb.io.req.bits.passthrough := false.B
   tlb.io.req.bits.size  := log2Ceil(coreInstBytes * fetchWidth).U
   tlb.io.req.bits.v     := io.ptw.status.v
@@ -670,10 +674,16 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val s1_pf_tlb_ok   = (!tlb.io.resp.miss && !tlb_force_miss)
   val s1_pf_ppc_valid = s1_pf_replay || s1_pf_tlb_ok
   val s1_pf_ppc_exp  = Mux(s1_pf_replay, s1_pf_replay_exp, tlb.io.resp.ae.inst || tlb.io.resp.pf.inst)
-  
-  trans_queue.io.enq.valid   := s1_pf_tlb_ok && !f1_pf_clear && s1_pf_valid && !s1_pf_replay
-  trans_queue.io.enq.bits    := tlb.io.resp
-  trans_queue.io.enq_ftq_idx := s1_pf_ftq_idx
+
+  if (enablePfPipeline) {
+    trans_queue.io.enq.valid   := s1_pf_tlb_ok && !f1_pf_clear && s1_pf_valid && !s1_pf_replay
+    trans_queue.io.enq.bits    := tlb.io.resp
+    trans_queue.io.enq_ftq_idx := s1_pf_ftq_idx
+  } else {
+    trans_queue.io.enq.valid   := false.B
+    trans_queue.io.enq.bits    := DontCare
+    trans_queue.io.enq_ftq_idx := DontCare
+  }
 
   // s1_pf_can_go 表示 s1 不再需要保留：被 clear 或者 TLB 命中且 ICache 接收到了这一条 pf 请求
   val s1_pf_dist_exceeded = (limitPfDist > 0).B && s1_pf_ahead_ifu && (s1_pf_ifu_dist > limitPfDist.U)
@@ -714,11 +724,30 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val f1_clear     = WireInit(false.B)
   val bpd_f1_clear = WireInit(false.B)
 
-  // ifu 这边不再访问 tlb，从 trans_queue 中拿翻译结果
-  trans_queue.io.deq.ready := s1_valid && !s1_is_replay && !f1_clear
-  val s1_tlb_miss = !s1_is_replay && !trans_queue.io.deq.valid
-  val s1_tlb_resp = Mux(s1_is_replay, RegNext(s0_replay_resp), trans_queue.io.deq.bits)
-  val s1_ppc  = Mux(s1_is_replay, RegNext(s0_replay_ppc), trans_queue.io.deq.bits.paddr)
+  if (enablePfPipeline) {
+    // ifu 这边不再访问 tlb，从 trans_queue 中拿翻译结果
+    trans_queue.io.deq.ready := s1_valid && !s1_is_replay && !f1_clear
+  } else {
+    // 预取流水线关闭时，ifu 直接访问 tlb
+    tlb.io.req.valid      := (s1_valid && !s1_is_replay && !f1_clear) || s1_is_sfence
+    tlb.io.req.bits.vaddr := s1_vpc
+    trans_queue.io.deq.ready := false.B
+  }
+  val s1_tlb_miss = if (enablePfPipeline) {
+    !s1_is_replay && !trans_queue.io.deq.valid
+  } else {
+    !s1_is_replay && tlb.io.resp.miss
+  }
+  val s1_tlb_resp = if (enablePfPipeline) {
+    Mux(s1_is_replay, RegNext(s0_replay_resp), trans_queue.io.deq.bits)
+  } else {
+    Mux(s1_is_replay, RegNext(s0_replay_resp), tlb.io.resp)
+  }
+  val s1_ppc = if (enablePfPipeline) {
+    Mux(s1_is_replay, RegNext(s0_replay_ppc), trans_queue.io.deq.bits.paddr)
+  } else {
+    Mux(s1_is_replay, RegNext(s0_replay_ppc), tlb.io.resp.paddr)
+  }
 
   icache.io.s1_paddr := s1_ppc
   icache.io.s1_kill  := s1_tlb_miss || f1_clear

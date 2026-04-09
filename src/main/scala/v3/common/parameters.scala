@@ -100,6 +100,7 @@ case class BoomCoreParams(
   trace: Boolean = false,
 
   // FDIP
+  enablePfPipeline: Boolean = true,
   fullMSHRSkip: Boolean = false,
   limitPfDist: Int = 0,
 
@@ -319,6 +320,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   //************************************
   // FDIP
 
+  val enablePfPipeline = boomParams.enablePfPipeline
   val fullMSHRSkip = boomParams.fullMSHRSkip
   val limitPfDist = boomParams.limitPfDist
 

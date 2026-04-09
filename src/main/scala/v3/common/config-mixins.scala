@@ -111,6 +111,15 @@ class EnableBoomFullMSHRSkip extends Config((site, here, up) => {
   }
 })
 
+class EnablePfConfig(enable: Boolean) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
+      enablePfPipeline = enable
+    )))
+    case other => other
+  }
+})
+
 class EnableBoomFlushGHistRestore extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
