@@ -19,6 +19,8 @@ case class BoomBTBParams(
   extendedNSets: Int = 128
 )
 
+case object BoomBTBKey extends Field[BoomBTBParams](BoomBTBParams())
+
 
 class BTBBranchPredictorBank(params: BoomBTBParams = BoomBTBParams())(implicit p: Parameters) extends BranchPredictorBank()(p)
 {

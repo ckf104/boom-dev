@@ -23,6 +23,53 @@ import boom.v3.lsu._
 // BOOM Config Fragments
 // ---------------------
 
+class DCacheConfigs(nSet: Int, nWay: Int, nTLB: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(dcache = Some(tp.tileParams.dcache.get.copy(
+      nSets = nSet,
+      nWays = nWay,
+      nTLBWays = nTLB
+    ))))
+    case other => other
+  }
+})
+
+class ICacheConfigs(nWay: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(icache = Some(tp.tileParams.icache.get.copy(
+      nWays = nWay
+    ))))
+    case other => other
+  }
+})
+
+class FTQConfigs(nEntries: Int) extends Config((_,_,_) => PartialFunction.empty)
+
+
+class BusWidthConfigs(busWidth: Int) extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(
+      dcache = Some(tp.tileParams.dcache.get.copy(rowBits = busWidth)),
+      icache = Some(tp.tileParams.icache.get.copy(rowBits = busWidth))
+    ))
+    case other => other
+  }
+})
+
+class BTBConfig(nSet: Int = 128, nWay: Int = 2, offsetSz: Int = 13, extendedNSets: Int = 128) extends Config((site, here, up) => {
+  case BoomBTBKey => BoomBTBParams(nSets = nSet, nWays = nWay, offsetSz = offsetSz, extendedNSets = extendedNSets)
+})
+
+class TAGEConfig(params: BoomTageParams = BoomTageParams()) extends Config((_,_,_) => PartialFunction.empty)
+
+class UseLoopConfig(useLoop: Boolean) extends Config((_,_,_) => PartialFunction.empty)
+
+class PfMSHRNumber(n: Int) extends Config((_,_,_) => PartialFunction.empty)
+
+class LimitPrefetchDist(n: Int) extends Config((_,_,_) => PartialFunction.empty)
+
+class EnableBoomFlushGHistRestore extends Config((_,_,_) => PartialFunction.empty)
+
 class WithBoomCommitLogPrintf extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
@@ -489,7 +536,7 @@ class WithTAGELBPD extends Config((site, here, up) => {
       branchPredictor = ((resp_in: BranchPredictionBankResponse, p: Parameters) => {
         val loop = Module(new LoopBranchPredictorBank()(p))
         val tage = Module(new TageBranchPredictorBank()(p))
-        val btb = Module(new BTBBranchPredictorBank()(p))
+        val btb = Module(new BTBBranchPredictorBank(p(BoomBTBKey))(p))
         val bim = Module(new BIMBranchPredictorBank()(p))
         val ubtb = Module(new FAMicroBTBBranchPredictorBank()(p))
         val preds = Seq(loop, tage, btb, ubtb, bim)
@@ -519,7 +566,7 @@ class WithTAGEBPD extends Config((site, here, up) => {
       localHistoryNSets = 0,
       branchPredictor = ((resp_in: BranchPredictionBankResponse, p: Parameters) => {
         val tage = Module(new TageBranchPredictorBank()(p))
-        val btb = Module(new BTBBranchPredictorBank()(p))
+        val btb = Module(new BTBBranchPredictorBank(p(BoomBTBKey))(p))
         val bim = Module(new BIMBranchPredictorBank()(p))
         val ubtb = Module(new FAMicroBTBBranchPredictorBank()(p))
         val preds = Seq(tage, btb, ubtb, bim)
@@ -549,7 +596,7 @@ class WithBoom2BPD extends Config((site, here, up) => {
         val gshare = Module(new TageBranchPredictorBank(
           BoomTageParams(tableInfo = Seq((256, 16, 7)))
         )(p))
-        val btb = Module(new BTBBranchPredictorBank()(p))
+        val btb = Module(new BTBBranchPredictorBank(p(BoomBTBKey))(p))
         val bim = Module(new BIMBranchPredictorBank()(p))
         val preds = Seq(bim, btb, gshare)
         preds.map(_.io := DontCare)
@@ -572,7 +619,7 @@ class WithAlpha21264BPD extends Config((site, here, up) => {
       localHistoryLength = 32,
       localHistoryNSets = 128,
       branchPredictor = ((resp_in: BranchPredictionBankResponse, p: Parameters) => {
-        val btb = Module(new BTBBranchPredictorBank()(p))
+        val btb = Module(new BTBBranchPredictorBank(p(BoomBTBKey))(p))
         val gbim = Module(new HBIMBranchPredictorBank()(p))
         val lbim = Module(new HBIMBranchPredictorBank(BoomHBIMParams(useLocal=true))(p))
         val tourney = Module(new TourneyBranchPredictorBank()(p))
