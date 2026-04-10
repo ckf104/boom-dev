@@ -70,6 +70,8 @@ class PfMSHRNumber(n: Int) extends Config((_,_,_) => PartialFunction.empty)
 
 class LimitPrefetchDist(n: Int) extends Config((_,_,_) => PartialFunction.empty)
 
+class EnablePfConfig(b: Boolean) extends Config((_,_,_) => PartialFunction.empty)
+
 class EnableBoomFlushGHistRestore extends Config((_,_,_) => PartialFunction.empty)
 
 class WithBoomCommitLogPrintf extends Config((site, here, up) => {
