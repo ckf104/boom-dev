@@ -86,7 +86,8 @@ class ICacheBundle(val outer: ICache) extends BoomBundle()(outer.p)
   //Enable_PerfCounter_Support
   val icache_valid_access = Output(Bool())
 
-  // Prefetch pipeline interface
+  // Prefetch redirect bookkeeping. These signals may clear the registered s2
+  // prefetch state, but must not gate the current-cycle prefetch MSHR issue path.
   val mshr_flush    = Input(Bool()) // predecode / backend flush
   val bpd_f3_flush  = Input(Bool())
   val bpd_f3_ftq_idx = Input(new FTQPtr)
@@ -182,8 +183,9 @@ class ICacheMSHRIO(implicit p: Parameters) extends CoreBundle with HasBoomFronte
 // 是安全的，因为 fetch 这边会 replay，重复请求。而误判为 MSHR miss 会导致对同一个 cache line 发起多
 // 个 MSHR 请求，导致 ICache 中包含重复表项，这是危险的）
 
-// TODO: 目前的实现是，当 isFetch 为 true 时，行为与 BOOM 保持一致；当 isFetch 为 false 时，接受 fence.i 和 flush 信号，
-// 但是 flush 也会 invalidate 写回
+// TODO: 目前的实现是，当 isFetch 为 true 时，行为与 BOOM 保持一致；当 isFetch 为 false 时，模块仍保留
+// flush 输入，但 ICache 只用 fence.i/invalidate 取消 prefetch MSHR。f3 redirect 不再 flush 已经进入
+// prefetch MSHR 发请求路径的请求；错误预取只影响带宽/污染，不影响架构正确性。
 class ICacheMSHR(isFetch: Boolean, ID: Int)(implicit p: Parameters) extends BoomModule
   with HasBoomFrontendParameters
 {
@@ -407,7 +409,6 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
   
   val s1_pf_MSHR_hit  = Wire(Bool())
   val s1_pf_cache_hit = Wire(Bool())
-  // TODO: 如何 flush s2_pf_valid？
   val s2_pf_valid        = RegEnable(s1_pf_valid && s1_pf_ppc_valid && !io.s1_pf_clear && !io.s1_pf_ppc_exp,
                                     false.B, s1_pf_fire)
   val s2_pf_hit          = RegEnable(s1_pf_MSHR_hit || s1_pf_cache_hit, s1_pf_fire)
@@ -446,7 +447,10 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
   }
   pfMSHRs.foreach { m =>
     m.io.fencei := io.invalidate
-    m.io.flush  := io.mshr_flush
+    // Do not let f3 branch-prediction redirects suppress prefetch MSHR issue.
+    // Wrong-path prefetches are harmless for correctness; fence.i/invalidate
+    // remains the correctness mechanism that can cancel them.
+    m.io.flush  := false.B
     m.io.lookUps(0).paddr := s2_paddr
     m.io.lookUps(1).paddr := s2_pf_ppc
     m.io.reqDistBucket := s2_pf_dist_bucket
@@ -537,7 +541,7 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
   val s2_pf_conflict_with_ifu_s2 = s2_valid && (s2_pf_blkPaddr === s2_blkPaddr)
 
   // Decide in s2_pf whether prefetch needs a new MSHR entry
-  val need_pf_mshr = s2_pf_valid && !s2_pf_access_hit && !s2_pf_conflict_with_ifu_s2 && !s2_pf_clear
+  val need_pf_mshr = s2_pf_valid && !s2_pf_access_hit && !s2_pf_conflict_with_ifu_s2
 
   // Allocate prefetch requests into the first available prefetch MSHR (s2_pf)
   if (nPrefetchMSHRs > 0) {
@@ -770,11 +774,10 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
   }
 
   // Flow Queue: when empty and enqueue fires, data is immediately visible at
-  // dequeue in the same cycle.  Flushed on fence.i (all MSHRs invalidated)
-  // and mshr_flush (all un-issued prefetch MSHRs invalidated; issued ones
-  // have already been dequeued when their acquire fired).
+  // dequeue in the same cycle. Flushed only on fence.i/invalidate; f3 redirects
+  // must not suppress an already allocated prefetch MSHR's acquire path.
   val pfFifoDeq = Queue(pfFifoEnq, math.max(nPrefetchMSHRs, 1), flow = true,
-                         flush = Some(io.invalidate || io.mshr_flush))
+                         flush = Some(io.invalidate))
 
   val pf_effective_idx = pfFifoDeq.bits
 
@@ -976,5 +979,3 @@ class ICacheModule(outer: ICache) extends LazyModuleImp(outer)
     "" + (if (refillIsWide) "Wide-refill (2 sub-banks)" else "Single-bank"),
     "I-TLB ways    : " + cacheParams.nTLBWays + "\n")
 }
-
-
