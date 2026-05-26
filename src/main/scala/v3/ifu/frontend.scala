@@ -913,7 +913,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   f3_bpd_resp.io.enq.bits.ghist := ftq.io.s3_preds_info.ghist
   f3_bpd_resp.io.enq.bits.fsrc := ftq.io.s3_preds_info.preds_info.fsrc
   f3_bpd_resp.io.enq.bits.tsrc := ftq.io.s3_preds_info.preds_info.tsrc
-  f3_bpd_resp.io.enq.bits.target := ftq.io.s3_preds_info.pred_target
+  f3_bpd_resp.io.enq.bits.check_target := ftq.io.s3_preds_info.check_target
+  f3_bpd_resp.io.enq.bits.bpd_target := ftq.io.s3_preds_info.bpd_target
 
   f3.io.deq.ready := f4_ready
   f3_bpd_resp.io.deq.ready := f4_ready
@@ -1167,7 +1168,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val f3_has_redirect = f3_redirects.reduce(_||_)
   val f3_cfi_is_ret = f3_fetch_bundle.cfi_is_ret && f3_fetch_bundle.cfi_idx.valid
   val f3_redirect_idx = PriorityEncoder(f3_redirects)
-  val f3_bpd_predicted_target = f3_bpd_resp.io.deq.bits.target
+  val f3_bpd_predicted_target = f3_bpd_resp.io.deq.bits.bpd_target
   val f3_is_jalr = f3_fetch_bundle.cfi_idx.valid && f3_fetch_bundle.cfi_type === CFI_JALR
   val f3_use_bpd_target =
     (f3_cfi_is_ret && disablePostRetCorrection.B) ||
@@ -1230,7 +1231,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   val f3_correct_ghist = !(f3_ghist_all_zero && shift_zero_or_no_shift_f3) &&
                           f3_pred_ghist_update_type =/= f3_bpd_resp.io.deq.bits.ghist_update_type &&
                           enableGHistStallRepair.B
-  val f3_correct_target = f3_predicted_target =/= f3_bpd_resp.io.deq.bits.target
+  val f3_correct_target = f3_predicted_target =/= f3_bpd_resp.io.deq.bits.check_target
   val itlb_exception = f3_fetch_bundle.xcpt_pf_if || f3_fetch_bundle.xcpt_ae_if
 
   val f3_bp_check_happened = RegInit(false.B)

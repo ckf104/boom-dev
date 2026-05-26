@@ -100,8 +100,10 @@ class BranchPredBundleWithGHist(implicit p: Parameters) extends BoomBundle()(p)
   val preds = new FetchPacketPredsInfo
   val tsrc = UInt(BSRC_SZ.W)
   val fsrc = UInt(BSRC_SZ.W)
-  // 分支预测器的结果，可能来自 f2 预测， f3 预测或 ftq
-  val target = UInt(vaddrBitsExtended.W)
+  // 用于 predecode 校验的旧预测目标，可能来自 f2 预测或 ftq
+  val check_target = UInt(vaddrBitsExtended.W)
+  // 用于禁用 ret/jalr post-fetch correction 时信任的 BPD 目标
+  val bpd_target = UInt(vaddrBitsExtended.W)
   val ghist_update_type = UInt(GHR_UPDATE_SZ.W)
   // 取该 fetch packet 时的信息，来自 ftq
   val ghist = new GlobalHistory
@@ -880,4 +882,3 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
 class NullBranchPredictorBank(implicit p: Parameters) extends BranchPredictorBank()(p) {
   val mems = Nil
 }
-
