@@ -1094,12 +1094,18 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
 
   val f3_has_redirect = f3_redirects.reduce(_||_)
   val f3_cfi_is_ret = f3_fetch_bundle.cfi_is_ret && f3_fetch_bundle.cfi_idx.valid
+  val f3_redirect_idx = PriorityEncoder(f3_redirects)
+  val f3_bpd_predicted_target = f3_bpd_resp.io.deq.bits.target
+  val f3_is_jalr = f3_fetch_bundle.cfi_idx.valid && f3_fetch_bundle.cfi_type === CFI_JALR
+  val f3_use_bpd_target =
+    (f3_cfi_is_ret && disablePostRetCorrection.B) ||
+    (f3_is_jalr && !f3_cfi_is_ret && disablePostJalrCorrection.B)
   val f3_predicted_target = Mux(f3_has_redirect,
-    Mux(f3_cfi_is_ret && disablePostRetCorrection.B,
-      nextFetch(f3_fetch_bundle.pc),
+    Mux(f3_use_bpd_target,
+      f3_bpd_predicted_target,
       Mux(f3_cfi_is_ret && useBPD.B && useRAS.B,
         f3_bpd_resp.io.deq.bits.preds.ras_top,
-        f3_targs(PriorityEncoder(f3_redirects))
+        f3_targs(f3_redirect_idx)
       )),
     nextFetch(f3_fetch_bundle.pc)
   )
