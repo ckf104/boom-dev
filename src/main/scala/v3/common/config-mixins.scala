@@ -138,6 +138,33 @@ class DisableBoomBranchPredictor extends Config((site, here, up) => {
   }
 })
 
+class DisablePostCondCorrection extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
+      disablePostCondCorrection = true
+    )))
+    case other => other
+  }
+})
+
+class DisablePostRetCorrection extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
+      disablePostRetCorrection = true
+    )))
+    case other => other
+  }
+})
+
+class DisablePostJalrCorrection extends Config((site, here, up) => {
+  case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
+    case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(
+      disablePostJalrCorrection = true
+    )))
+    case other => other
+  }
+})
+
 class WithBoomCommitLogPrintf extends Config((site, here, up) => {
   case TilesLocated(InSubsystem) => up(TilesLocated(InSubsystem), site) map {
     case tp: BoomTileAttachParams => tp.copy(tileParams = tp.tileParams.copy(core = tp.tileParams.core.copy(

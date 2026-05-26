@@ -66,6 +66,9 @@ case class BoomCoreParams(
   bpdMaxMetaLength: Int = 120,
   numRasEntries: Int = 32,
   enableRasTopRepair: Boolean = true,
+  disablePostCondCorrection: Boolean = false,
+  disablePostRetCorrection: Boolean = false,
+  disablePostJalrCorrection: Boolean = false,
 
   /* more stuff */
   useCompressed: Boolean = true,
@@ -263,6 +266,9 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val nRasEntries = boomParams.numRasEntries max 2
   val useRAS = boomParams.numRasEntries > 0
   val enableRasTopRepair = boomParams.enableRasTopRepair
+  val disablePostCondCorrection = boomParams.disablePostCondCorrection
+  val disablePostRetCorrection = boomParams.disablePostRetCorrection
+  val disablePostJalrCorrection = boomParams.disablePostJalrCorrection
 
   val useBPD = boomParams.enableBranchPrediction
 

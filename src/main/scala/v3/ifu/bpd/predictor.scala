@@ -642,7 +642,10 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
     io.resp.f3_meta.fsrc := s3_fsrc
 
     // 输出 f3 的 preds info
-    val f3_br_taken = f3_preds.map(p => p.taken)
+    val f3_br_taken = f3_preds.map(p =>
+      Mux(disablePostCondCorrection.B,
+        p.taken && p.predicted_pc.valid && p.is_br,
+        p.taken))
     io.resp.f3_preds_info.br_taken := VecInit(f3_br_taken).asUInt
     val f3_is_jal = (0 until fetchWidth) map { i =>
       f3_mask(i) && f3_preds(i).predicted_pc.valid && (f3_preds(i).is_jal)
@@ -877,5 +880,4 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
 class NullBranchPredictorBank(implicit p: Parameters) extends BranchPredictorBank()(p) {
   val mems = Nil
 }
-
 

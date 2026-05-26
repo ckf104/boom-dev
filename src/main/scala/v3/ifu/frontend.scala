@@ -1041,7 +1041,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
         (predecode_cfi_type(i) === CFI_BR && f3_bpd_resp.io.deq.bits.preds.br_taken(i) && useBPD.B)
       )
       f3_mask  (i) := predecode_valid(i) && !redirect_found
-      f3_targs (i) := Mux(predecode_cfi_type(i) === CFI_JALR,
+      f3_targs (i) := Mux(predecode_cfi_type(i) === CFI_JALR && !disablePostJalrCorrection.B,
         f3_bpd_resp.io.deq.bits.preds.jal_target,
         predecode_targets(i))
 
@@ -1089,11 +1089,15 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   // Redirect earlier stages only if the later stage
   // can consume this packet
 
-  val f3_predicted_target = Mux(f3_redirects.reduce(_||_),
-    Mux(f3_fetch_bundle.cfi_is_ret && useBPD.B && useRAS.B,
-      f3_bpd_resp.io.deq.bits.preds.ras_top,
-      f3_targs(PriorityEncoder(f3_redirects))
-    ),
+  val f3_has_redirect = f3_redirects.reduce(_||_)
+  val f3_cfi_is_ret = f3_fetch_bundle.cfi_is_ret && f3_fetch_bundle.cfi_idx.valid
+  val f3_predicted_target = Mux(f3_has_redirect,
+    Mux(f3_cfi_is_ret && disablePostRetCorrection.B,
+      nextFetch(f3_fetch_bundle.pc),
+      Mux(f3_cfi_is_ret && useBPD.B && useRAS.B,
+        f3_bpd_resp.io.deq.bits.preds.ras_top,
+        f3_targs(PriorityEncoder(f3_redirects))
+      )),
     nextFetch(f3_fetch_bundle.pc)
   )
 
