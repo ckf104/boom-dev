@@ -107,6 +107,12 @@ case class BoomCoreParams(
   enablePfPipeline: Boolean = true,
   fullMSHRSkip: Boolean = false,
   limitPfDist: Int = 0,
+  enableUFTQAUR: Boolean = false,
+  pfWindowSize: Int = 500,
+  targetAccuracy: Int = 70,
+  uftqAurInitPfDist: Int = 32,
+  uftqAurStep: Int = 1,
+  uftqAurMinPfDist: Int = 6,
 
   // When true, restore ghist on refetch/next ROB flush instead of resetting to zero
   enableFlushGHistRestore: Boolean = false,
@@ -331,6 +337,12 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val enablePfPipeline = boomParams.enablePfPipeline
   val fullMSHRSkip = boomParams.fullMSHRSkip
   val limitPfDist = boomParams.limitPfDist
+  val enableUFTQAUR = boomParams.enableUFTQAUR
+  val pfWindowSize = boomParams.pfWindowSize
+  val targetAccuracy = boomParams.targetAccuracy
+  val uftqAurInitPfDist = boomParams.uftqAurInitPfDist
+  val uftqAurStep = boomParams.uftqAurStep
+  val uftqAurMinPfDist = boomParams.uftqAurMinPfDist
 
   val enableFlushGHistRestore = boomParams.enableFlushGHistRestore
 

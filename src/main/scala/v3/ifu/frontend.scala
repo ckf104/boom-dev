@@ -688,8 +688,65 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     trans_queue.io.enq_ftq_idx := DontCare
   }
 
+  val pfDistLimitWidth = if (enableUFTQAUR) {
+    log2Ceil(Seq(ftqSz, uftqAurInitPfDist, uftqAurMinPfDist, uftqAurStep).max + uftqAurStep + 2)
+  } else {
+    math.max(1, log2Ceil(limitPfDist + 1))
+  }
+  val effectivePfDistLimit = if (enableUFTQAUR) {
+    require(pfWindowSize > 0, "pfWindowSize must be positive when UFTQ-AUR is enabled")
+    require(targetAccuracy >= 0 && targetAccuracy <= 100, "targetAccuracy must be in [0, 100]")
+    require(uftqAurStep > 0, "uftqAurStep must be positive when UFTQ-AUR is enabled")
+    require(uftqAurMinPfDist >= 0, "uftqAurMinPfDist must be non-negative")
+
+    val maxPfDist = ftqSz - 1
+    val minPfDist = math.min(uftqAurMinPfDist, maxPfDist)
+    val initPfDist = math.max(minPfDist, math.min(uftqAurInitPfDist, maxPfDist))
+    val targetHitCount = (targetAccuracy * pfWindowSize + 99) / 100
+    val pfCounterWidth = log2Ceil(pfWindowSize + 1)
+
+    val dynamicPfDist = RegInit(initPfDist.U(pfDistLimitWidth.W))
+    val pfWindowCnt = RegInit(0.U(pfCounterWidth.W))
+    val pfHitCnt = RegInit(0.U(pfCounterWidth.W))
+
+    val pfRefill = icache.io.pf_refill_dist_bucket.valid
+    val pfHit = icache.io.pf_hit_success
+    val pfWindowDone = pfRefill && pfWindowCnt === (pfWindowSize - 1).U
+    val pfHitCntInc = pfHitCnt +& pfHit.asUInt
+    val nextPfHitCnt = Mux(pfHitCntInc > pfWindowSize.U,
+      pfWindowSize.U(pfCounterWidth.W),
+      pfHitCntInc(pfCounterWidth-1, 0))
+
+    val maxPfDistU = maxPfDist.U(pfDistLimitWidth.W)
+    val minPfDistU = minPfDist.U(pfDistLimitWidth.W)
+    val stepU = uftqAurStep.U(pfDistLimitWidth.W)
+    val incSum = dynamicPfDist +& stepU
+    val incPfDist = Mux(incSum > maxPfDistU, maxPfDistU, incSum(pfDistLimitWidth-1, 0))
+    val decClampThreshold = math.min(maxPfDist, minPfDist + uftqAurStep)
+    val decPfDist = Mux(dynamicPfDist <= decClampThreshold.U(pfDistLimitWidth.W),
+      minPfDistU,
+      dynamicPfDist - stepU)
+
+    when (pfWindowDone) {
+      dynamicPfDist := Mux(nextPfHitCnt >= targetHitCount.U, incPfDist, decPfDist)
+      pfWindowCnt := 0.U
+      pfHitCnt := 0.U
+    } .otherwise {
+      when (pfRefill) {
+        pfWindowCnt := (pfWindowCnt + 1.U)(pfCounterWidth-1, 0)
+      }
+      when (pfHit) {
+        pfHitCnt := nextPfHitCnt
+      }
+    }
+
+    dynamicPfDist
+  } else {
+    limitPfDist.U(pfDistLimitWidth.W)
+  }
+
   // s1_pf_can_go 表示 s1 不再需要保留：被 clear 或者 TLB 命中且 ICache 接收到了这一条 pf 请求
-  val s1_pf_dist_exceeded = (limitPfDist > 0).B && s1_pf_ahead_ifu && (s1_pf_ifu_dist > limitPfDist.U)
+  val s1_pf_dist_exceeded = (effectivePfDistLimit > 0.U) && s1_pf_ahead_ifu && (s1_pf_ifu_dist > effectivePfDistLimit)
   val s1_pf_can_advance = icache.io.s1_pf_can_advance && !s1_pf_dist_exceeded
   val s1_pf_can_go = s1_pf_ppc_valid && s1_pf_can_advance
 
