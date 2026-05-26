@@ -511,6 +511,7 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
   // Frontend s0 stall statistics from frontend
   val s0_ifu_real_not_valid = io.ifu.s0_ifu_real_not_valid
   val s0_ifu_ftq_backpress  = io.ifu.s0_ifu_ftq_backpress
+  val predecode_redirect_count = io.ifu.predecode_redirect_count
 
   // Frontend 6-category ICache miss-stall cycle accounting (12-bit per category).
   val ic_miss_stall_seq       = io.ifu.ic_miss_stall_seq
@@ -572,11 +573,13 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
     // 39: ROB flushes caused by MINI_EXCEPTION_MEM_ORDERING
     event_counters.io.event_signals(39) := Mux(rob_mem_ordering_flush, 1.U, 0.U)
 
+    // Predecode redirect profiling
+    // 40: predecode_redirect pulse count
+    event_counters.io.event_signals(40) := Mux(predecode_redirect_count, 1.U, 0.U)
+
     // Decode valid pattern profiling
-    // 40: all dec_valids are false
     // 41: all dec_valids are true
     // 42: mixed dec_valids (neither all false nor all true)
-    event_counters.io.event_signals(40) := Mux(dec_all_false, 1.U, 0.U)
     event_counters.io.event_signals(41) := Mux(dec_all_true, 1.U, 0.U)
     event_counters.io.event_signals(42) := Mux(!dec_all_false && !dec_all_true, 1.U, 0.U)
 

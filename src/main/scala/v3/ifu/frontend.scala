@@ -346,6 +346,9 @@ class BoomFrontendIO(implicit p: Parameters) extends BoomBundle
   val s0_ifu_real_not_valid = Input(Bool())
   val s0_ifu_ftq_backpress  = Input(Bool())
 
+  // Predecode redirect pulse for perf counters
+  val predecode_redirect_count = Input(Bool())
+
   // Frontend bubble statistics by clear source
   // Bubble count is based on distanceBetween(s0_ifu_ftq_idx_reg, s0_ftq_idx)
   //  - f2_clear_bubble/f3_clear_bubble/predecode_clear_bubble: low 4 bits
@@ -1698,6 +1701,7 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   // Export s0 stall conditions for perf counters
   io.cpu.s0_ifu_real_not_valid := !s0_ifu_real_valid
   io.cpu.s0_ifu_ftq_backpress  := s0_valid && ifu_to_ftq_not_ready
+  io.cpu.predecode_redirect_count := predecode_redirect
   when (!s0_ifu_real_valid) {
     s0_ifu_valid_reg   := s0_valid
     s0_ifu_vpc_reg     := s0_ifu_vpc
