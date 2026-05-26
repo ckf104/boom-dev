@@ -1571,7 +1571,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   // 当 pf s0 希望写入的 ftq full 时，暂停 prefetch 流水线，使用
   // s0 寄存器暂存 pf 请求
   val pf_to_ftq_not_ready = isFull(ftq.io.bpd_commit_ptr, s0_pf_ftq_idx)
-  s0_pf_real_valid := s0_pf_valid && !pf_to_ftq_not_ready && !icache.io.s0_pf_blocked
+  val sync_decouple_pf_stall = disableSyncDecouple.B && s0_pf_valid && (s0_pf_ftq_idx === s0_bpd_ftq_idx)
+  s0_pf_real_valid := s0_pf_valid && !pf_to_ftq_not_ready && !icache.io.s0_pf_blocked && !sync_decouple_pf_stall
   when (!s0_pf_real_valid) {
     s0_pf_valid_reg     := s0_pf_valid
     s0_pf_vpc_reg       := s0_pf_vpc
@@ -1697,7 +1698,8 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   // 当 ifu s0 希望写入的 ftq full 时，暂停前端流水线，使用
   // s0 寄存器暂存 fetch 请求
   val ifu_to_ftq_not_ready = isFull(ftq.io.bpd_commit_ptr, s0_ftq_idx)
-  s0_ifu_real_valid := s0_valid && !ifu_to_ftq_not_ready
+  val sync_decouple_ifu_stall = disableSyncDecouple.B && s0_valid && (s0_ftq_idx === s0_bpd_ftq_idx)
+  s0_ifu_real_valid := s0_valid && !ifu_to_ftq_not_ready && !sync_decouple_ifu_stall
   // Export s0 stall conditions for perf counters
   io.cpu.s0_ifu_real_not_valid := !s0_ifu_real_valid
   io.cpu.s0_ifu_ftq_backpress  := s0_valid && ifu_to_ftq_not_ready

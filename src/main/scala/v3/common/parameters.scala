@@ -69,6 +69,7 @@ case class BoomCoreParams(
   disablePostCondCorrection: Boolean = false,
   disablePostRetCorrection: Boolean = false,
   disablePostJalrCorrection: Boolean = false,
+  disableSyncDecouple: Boolean = false,
 
   /* more stuff */
   useCompressed: Boolean = true,
@@ -269,6 +270,7 @@ trait HasBoomCoreParameters extends freechips.rocketchip.tile.HasCoreParameters
   val disablePostCondCorrection = boomParams.disablePostCondCorrection
   val disablePostRetCorrection = boomParams.disablePostRetCorrection
   val disablePostJalrCorrection = boomParams.disablePostJalrCorrection
+  val disableSyncDecouple = boomParams.disableSyncDecouple
 
   val useBPD = boomParams.enableBranchPrediction
 
