@@ -340,6 +340,10 @@ class BoomFrontendIO(implicit p: Parameters) extends BoomBundle
   // Prefetch accuracy: true when a prefetch-filled line is first accessed by IFU
   val pf_hit_success = Input(Bool())
 
+  // Dynamic UFTQ-AUR prefetch distance samples for perf counters
+  val dynamic_pf_dist_sample_count = Input(Bool())
+  val dynamic_pf_dist_sum = Input(UInt(8.W))
+
   // Frontend s0 stall statistics
   //  - s0_ifu_real_not_valid: s0_ifu_real_valid is false
   //  - s0_ifu_ftq_backpress: s0_valid && ifu_to_ftq_not_ready
@@ -598,6 +602,10 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
   // Forward prefetch accuracy signal from ICache to core
   io.cpu.pf_hit_success := icache.io.pf_hit_success
 
+  // Dynamic UFTQ-AUR prefetch distance samples for perf counters
+  io.cpu.dynamic_pf_dist_sample_count := false.B
+  io.cpu.dynamic_pf_dist_sum := 0.U
+
   when (RegNext(reset.asBool) && !reset.asBool) {
     s0_valid   := true.B
     s0_ifu_vpc := io_reset_vector
@@ -726,8 +734,15 @@ class BoomFrontendModule(outer: BoomFrontend) extends LazyModuleImp(outer)
     val decPfDist = Mux(dynamicPfDist <= decClampThreshold.U(pfDistLimitWidth.W),
       minPfDistU,
       dynamicPfDist - stepU)
+    val dynamicPfDistSample = if (pfDistLimitWidth >= 8) {
+      dynamicPfDist(7, 0)
+    } else {
+      dynamicPfDist
+    }
 
     when (pfWindowDone) {
+      io.cpu.dynamic_pf_dist_sample_count := true.B
+      io.cpu.dynamic_pf_dist_sum := dynamicPfDistSample
       dynamicPfDist := Mux(nextPfHitCnt >= targetHitCount.U, incPfDist, decPfDist)
       pfWindowCnt := 0.U
       pfHitCnt := 0.U

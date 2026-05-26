@@ -492,6 +492,8 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
   val predecode_clear_bubble = io.ifu.predecode_clear_bubble
   val rob_flush_bubble       = io.ifu.rob_flush_bubble
   val mispred_flush_bubble   = io.ifu.mispred_flush_bubble
+  val dynamic_pf_dist_sample_count = io.ifu.dynamic_pf_dist_sample_count
+  val dynamic_pf_dist_sum          = io.ifu.dynamic_pf_dist_sum
 
   // Fetch buffer enqueue statistics from frontend
   val fb_enq_cnt  = io.ifu.fb_enq_cnt
@@ -593,11 +595,11 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
     // jalr: 25/59/60
     event_counters.io.event_signals(25) := ic_miss_stall_jalr(3,0)
 
-    // Frontend s2 replay statistics
-    // 26: all s2 replays
+    // Dynamic UFTQ-AUR prefetch distance sample statistics
+    // 26: dynamicPfDist sample count
     // 27: s2 replays due to itlb miss
     // 28: s2 replays due to icache miss with itlb hit
-    event_counters.io.event_signals(26) := Mux(s2_replay_total, 1.U, 0.U)
+    event_counters.io.event_signals(26) := Mux(dynamic_pf_dist_sample_count, 1.U, 0.U)
     event_counters.io.event_signals(27) := Mux(s2_replay_itlb_miss, 1.U, 0.U)
     event_counters.io.event_signals(28) := Mux(s2_replay_ic_miss, 1.U, 0.U)
 
@@ -626,16 +628,15 @@ class BoomCore()(implicit p: Parameters) extends BoomModule
     event_counters.io.event_signals(37) := Mux(s0_ifu_real_not_valid, 1.U, 0.U)
     event_counters.io.event_signals(38) := Mux(s0_ifu_ftq_backpress, 1.U, 0.U)
 
-    // 43-49: frontend bubble statistics by clear source
-    // 43: bubbles from F2 clear (low 4 bits)
-    // 44: bubbles from F3 clear (low 4 bits)
+    // 43-44: dynamicPfDist sum, low/high 4 bits, sampled when event 26 fires
+    // 45-49: remaining frontend bubble statistics by clear source
     // 45: bubbles from predecode clear (low 4 bits)
     // 46: backend ROB flush bubbles (low 4 bits)
     // 47: backend ROB flush bubbles (high 2 bits)
     // 48: backend mispredict flush bubbles (low 4 bits)
     // 49: backend mispredict flush bubbles (high 2 bits)
-    event_counters.io.event_signals(43) := f2_clear_bubble
-    event_counters.io.event_signals(44) := f3_clear_bubble
+    event_counters.io.event_signals(43) := Mux(dynamic_pf_dist_sample_count, dynamic_pf_dist_sum(3,0), 0.U)
+    event_counters.io.event_signals(44) := Mux(dynamic_pf_dist_sample_count, dynamic_pf_dist_sum(7,4), 0.U)
     event_counters.io.event_signals(45) := predecode_clear_bubble
 
     val rob_bubble_low  = rob_flush_bubble(3,0)
