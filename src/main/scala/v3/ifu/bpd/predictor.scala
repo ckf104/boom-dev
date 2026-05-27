@@ -652,8 +652,11 @@ class BranchPredictor(implicit p: Parameters) extends BoomModule()(p)
     val f3_is_jal = (0 until fetchWidth) map { i =>
       f3_mask(i) && f3_preds(i).predicted_pc.valid && (f3_preds(i).is_jal)
     }
+    val f3_has_jal = f3_is_jal.reduce(_||_)
     val f3_jal_idx = PriorityEncoder(f3_is_jal)
-    val f3_jal_target = f3_preds(f3_jal_idx).predicted_pc.bits
+    val f3_jal_target = Mux(f3_has_jal,
+                            f3_preds(f3_jal_idx).predicted_pc.bits,
+                            nextFetch(s3_vpc))
     io.resp.f3_preds_info.jal_target := f3_jal_target
     io.resp.f3_preds_info.jal_targets_debug := f3_preds.map(p => p.predicted_pc.bits)
     io.resp.f3_preds_info.ras_top := f3_preds(0).ras_top
